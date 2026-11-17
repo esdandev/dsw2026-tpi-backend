@@ -25,7 +25,7 @@
 
 ### Autenticación (`/api/auth`)
 - `POST /api/auth/admin/login` — login de administrador (email + password).
-- `POST /api/auth/patient/login` — login de paciente (email + dni). Si el paciente no existe, se registra automáticamente.
+- `POST /api/auth/patient/login` — login de paciente (email + dni, opcionalmente `firstName` y `lastName`). Si el paciente no existe, se registra automáticamente.
 - `POST /api/auth/admin/register` — registro de administradores (temporal, para pruebas).
 
 ### Especialidades (`/api/specialties`) — requiere token
@@ -55,4 +55,5 @@
 
 ## Notas
 - Todos los endpoints (salvo login) requieren `Authorization: Bearer <token>`.
+- Los turnos vistos por un administrador muestran `patient.fullName` con el nombre y apellido cargados en el login. Si el paciente no los tiene (cuentas creadas antes de agregar esos campos), se muestra su email.
 - Los errores siguen el formato `{ errorCode, message, details? }`.

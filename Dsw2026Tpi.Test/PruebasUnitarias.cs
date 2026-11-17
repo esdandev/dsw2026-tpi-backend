@@ -161,4 +161,35 @@ public class PruebasUnitarias
         Assert.Equal("BOOKED", result.Status);
         Assert.Equal(SlotStatus.BOOKED, slot.Status);
     }
+
+    [Fact]
+    public void AdministrativePatient_CuandoTieneNombreYApellido_EntoncesDevuelveElNombreCompleto()
+    {
+        var patient = new ApplicationUser
+        {
+            Dni = 40123456,
+            Email = "paciente@email.com",
+            FirstName = "Ana",
+            LastName = "Gómez"
+        };
+
+        var result = AppointmentModel.AdministrativePatient.From(patient);
+
+        Assert.Equal(40123456, result.Dni);
+        Assert.Equal("Ana Gómez", result.FullName);
+    }
+
+    [Fact]
+    public void AdministrativePatient_CuandoNoTieneNombre_EntoncesDevuelveElEmail()
+    {
+        var patient = new ApplicationUser
+        {
+            Dni = 40123456,
+            Email = "paciente@email.com"
+        };
+
+        var result = AppointmentModel.AdministrativePatient.From(patient);
+
+        Assert.Equal("paciente@email.com", result.FullName);
+    }
 }

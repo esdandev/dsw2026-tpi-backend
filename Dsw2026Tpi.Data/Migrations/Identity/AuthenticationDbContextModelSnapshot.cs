@@ -235,6 +235,14 @@ namespace Dsw2026Tpi.Data.Migrations.Identity
                     b.Property<long>("Dni")
                         .HasColumnType("bigint");
 
+                    b.Property<string>("FirstName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("LastName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
 

@@ -1,11 +1,21 @@
-﻿namespace Dsw2026Tpi.Application.Dtos;
+﻿using Dsw2026Tpi.Data.Identity;
+
+namespace Dsw2026Tpi.Application.Dtos;
 
 public static class AppointmentModel
 {
     //contiene información administrativa completa
     public record AdministrativeResponse(Guid AppointmentsId, string AppointmentsStatus, AdministrativePatient Patient, AdministrativeDoctor Doctor, DateTime AvailableTime);
     public record SearchAdministrativeResponse(Guid AppointmentsId, string AppointmentsStatus, AdministrativePatient Patient, AdministrativeDoctor Doctor, DateTime AvailableTime);
-    public record AdministrativePatient(long Dni, string FullName);
+    public record AdministrativePatient(long Dni, string FullName)
+    {
+        // Los pacientes registrados antes de que existiera el nombre no lo tienen: se muestra el email.
+        public static AdministrativePatient From(ApplicationUser user)
+        {
+            var fullName = $"{user.FirstName} {user.LastName}".Trim();
+            return new AdministrativePatient(user.Dni, fullName.Length > 0 ? fullName : user.Email ?? user.Dni.ToString());
+        }
+    }
     public record AdministrativeDoctor(Guid DoctorId, string Name, AdministrativeSpecialty Specialty);
     public record AdministrativeSpecialty(Guid SpecialtyId, string Name);
 

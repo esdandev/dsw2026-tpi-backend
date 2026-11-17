@@ -51,6 +51,9 @@ public class AuthenticationService : IAuthenticationService
     {
         var user = await _userManager.FindByEmailAsync(request.Email);
 
+        var firstName = string.IsNullOrWhiteSpace(request.FirstName) ? null : request.FirstName.Trim();
+        var lastName = string.IsNullOrWhiteSpace(request.LastName) ? null : request.LastName.Trim();
+
         // Si no existe, se registra automáticamente como paciente.
         if (user is null)
         {
@@ -59,6 +62,8 @@ public class AuthenticationService : IAuthenticationService
                 UserName = request.Email,
                 Email = request.Email,
                 Dni = request.Dni,
+                FirstName = firstName,
+                LastName = lastName,
             };
 
             var createResult = await _userManager.CreateAsync(user);
@@ -74,6 +79,17 @@ public class AuthenticationService : IAuthenticationService
         {
             if (user.Dni != request.Dni)
                 throw new AuthenticationException();
+
+            // Los pacientes registrados antes de que existiera el nombre lo completan en el próximo login.
+            var updatedFirstName = firstName ?? user.FirstName;
+            var updatedLastName = lastName ?? user.LastName;
+
+            if (updatedFirstName != user.FirstName || updatedLastName != user.LastName)
+            {
+                user.FirstName = updatedFirstName;
+                user.LastName = updatedLastName;
+                await _userManager.UpdateAsync(user);
+            }
         }
 
         var isPatient = await _userManager.IsInRoleAsync(user, Roles.Patient);
