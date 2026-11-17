@@ -3,7 +3,7 @@
 public static class AppointmentModel
 {
     //contiene información administrativa completa
-    public record AdministrativeResponse(Guid AppointmentsId, string AppointmentsStatus, AdministrativePatient Patient, AdministrativeDoctor Doctor);
+    public record AdministrativeResponse(Guid AppointmentsId, string AppointmentsStatus, AdministrativePatient Patient, AdministrativeDoctor Doctor, DateTime AvailableTime);
     public record SearchAdministrativeResponse(Guid AppointmentsId, string AppointmentsStatus, AdministrativePatient Patient, AdministrativeDoctor Doctor, DateTime AvailableTime);
     public record AdministrativePatient(long Dni, string FullName);
     public record AdministrativeDoctor(Guid DoctorId, string Name, AdministrativeSpecialty Specialty);

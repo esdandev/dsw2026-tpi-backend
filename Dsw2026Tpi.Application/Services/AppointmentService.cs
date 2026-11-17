@@ -129,7 +129,7 @@ public class AppointmentService : IAppointmentService
             return new AppointmentModel.AdministrativeResponse(appointment.Id, appointment.Status.ToString(),
                    new AppointmentModel.AdministrativePatient(patientDni, string.Empty), //Fullname vacio...
                    new AppointmentModel.AdministrativeDoctor(doctor.Id, doctor.Name,
-                   new AppointmentModel.AdministrativeSpecialty(specialty.Id, specialty.Name)));
+                   new AppointmentModel.AdministrativeSpecialty(specialty.Id, specialty.Name)), slot.Start);
         });
 
         return new Pagination<AppointmentModel.AdministrativeResponse>(normalizedPageSize, normalizedPageIndex, total, data);
