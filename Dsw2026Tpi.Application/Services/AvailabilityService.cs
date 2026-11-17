@@ -124,8 +124,8 @@ public class AvailabilityService : IAvailabilityService
                     Id = Guid.NewGuid(),
                     DoctorId = rule.DoctorId,
                     RuleId = rule.Id,
-                    Start = DateTime.SpecifyKind(slotStart, DateTimeKind.Utc),
-                    End = DateTime.SpecifyKind(slotEnd, DateTimeKind.Utc),
+                    Start = Clock.FromArgentina(slotStart),
+                    End = Clock.FromArgentina(slotEnd),
                     Status = SlotStatus.AVAILABLE,
                     Capacity = rule.Capacity,
                     BookedCount = 0
@@ -159,7 +159,8 @@ public class AvailabilityService : IAvailabilityService
 
         ValidateNoOverlapsWithinRequest(parsed);
 
-        var currentMonthStart = new DateTime(Clock.Now.Year, Clock.Now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var today = Clock.Today;
+        var currentMonthStart = Clock.FromArgentina(new DateTime(today.Year, today.Month, 1));
         var existing = await _persistence.GetFiltered<AvailabilityRule>(r =>
             r.DoctorId == doctorId && r.IsActive && r.EffectiveFrom >= currentMonthStart);
         foreach (var (day, start, end) in parsed)
@@ -200,8 +201,8 @@ public class AvailabilityService : IAvailabilityService
             };
 
             await _persistence.Add(rule);
-            await GenerateSlotsForRule(rule, Clock.Today,
-                new DateTime(Clock.Now.Year, Clock.Now.Month, DateTime.DaysInMonth(Clock.Now.Year, Clock.Now.Month)));
+            await GenerateSlotsForRule(rule, today,
+                new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)));
 
             createdRules.Add(rule);
         }
@@ -238,8 +239,11 @@ public class AvailabilityService : IAvailabilityService
         ValidateNoOverlapsWithinRequest(parsed);
 
         var now = Clock.Now;
-        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-        var nextMonthStart = monthStart.AddMonths(1);
+        var today = Clock.Today;
+        var monthStartLocal = new DateTime(today.Year, today.Month, 1);
+        var nextMonthLocal = monthStartLocal.AddMonths(1);
+        var monthStart = Clock.FromArgentina(monthStartLocal);
+        var nextMonthStart = Clock.FromArgentina(nextMonthLocal);
 
         var slotsInMonth = await _persistence.GetFiltered<AvailabilitySlot>(slot =>
             slot.DoctorId == doctorId && slot.Start > now && slot.Start < nextMonthStart);
@@ -290,9 +294,9 @@ public class AvailabilityService : IAvailabilityService
             createdRules.Add(rule);
 
             var ruleDays = group.Select(schedule => schedule.Day).ToHashSet();
-            var currentDate = now.Date;
+            var currentDate = today;
 
-            while (currentDate < nextMonthStart)
+            while (currentDate < nextMonthLocal)
             {
                 var dayName = GetDayName(currentDate.DayOfWeek);
 
@@ -310,8 +314,8 @@ public class AvailabilityService : IAvailabilityService
                     continue;
                 }
 
-                var slotStart = DateTime.SpecifyKind(currentDate.Add(rule.StartTime), DateTimeKind.Utc);
-                var dayEnd = DateTime.SpecifyKind(currentDate.Add(rule.EndTime), DateTimeKind.Utc);
+                var slotStart = Clock.FromArgentina(currentDate.Add(rule.StartTime));
+                var dayEnd = Clock.FromArgentina(currentDate.Add(rule.EndTime));
 
                 while (slotStart.Add(rule.SlotDuration) <= dayEnd)
                 {

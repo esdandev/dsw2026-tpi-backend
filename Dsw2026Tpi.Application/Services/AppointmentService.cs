@@ -111,11 +111,11 @@ public class AppointmentService : IAppointmentService
     }
     public async Task<Pagination<AppointmentModel.AdministrativeResponse>> GetByDate(DateOnly date, int pageSize, int pageIndex, AppointmentStatus? status = null)
     {
-        var dayStart = date.ToDateTime(TimeOnly.MinValue);
-        var dayEnd = date.ToDateTime(TimeOnly.MaxValue);
+        var dayStart = Clock.FromArgentina(date.ToDateTime(TimeOnly.MinValue));
+        var dayEnd = Clock.FromArgentina(date.AddDays(1).ToDateTime(TimeOnly.MinValue));
 
         var (appointments, patientDnis, total, normalizedPageSize, normalizedPageIndex) = await QueryAppointments(
-            appointment => appointment.AvailabilitySlot!.Start >= dayStart && appointment.AvailabilitySlot.Start <= dayEnd &&
+            appointment => appointment.AvailabilitySlot!.Start >= dayStart && appointment.AvailabilitySlot.Start < dayEnd &&
             (!status.HasValue || appointment.Status == status.Value),
             pageSize, pageIndex);
 
@@ -150,15 +150,15 @@ public class AppointmentService : IAppointmentService
 
         }
 
-        DateTime? dayStart = date.HasValue ? date.Value.ToDateTime(TimeOnly.MinValue) : null;
-        DateTime? dayEnd = date.HasValue ? date.Value.ToDateTime(TimeOnly.MaxValue) : null;
+        DateTime? dayStart = date.HasValue ? Clock.FromArgentina(date.Value.ToDateTime(TimeOnly.MinValue)) : null;
+        DateTime? dayEnd = date.HasValue ? Clock.FromArgentina(date.Value.AddDays(1).ToDateTime(TimeOnly.MinValue)) : null;
 
         var (appointments, patientDnis, total, normalizedPageSize, normalizedPageIndex) = await QueryAppointments(
             appointment =>
                 (!specialtyId.HasValue || appointment.AvailabilitySlot!.Doctor!.SpecialityId == specialtyId.Value) &&
                 (!doctorId.HasValue || appointment.AvailabilitySlot!.DoctorId == doctorId.Value) &&
                 (patientId == null || appointment.PatientUserId == patientId) &&
-                (!dayStart.HasValue || (appointment.AvailabilitySlot!.Start >= dayStart.Value && appointment.AvailabilitySlot.Start <= dayEnd!.Value)) &&
+                (!dayStart.HasValue || (appointment.AvailabilitySlot!.Start >= dayStart.Value && appointment.AvailabilitySlot.Start < dayEnd!.Value)) &&
                 (!status.HasValue || appointment.Status == status.Value),
             pageSize, pageIndex);
 
