@@ -58,8 +58,8 @@ public class DoctorService : IDoctorService
         if (doctor is null || doctor.Deleted || !doctor.IsActive)
             throw new EntityNotFoundException(DoctorNotFound);
 
-        var now = Clock.Now;
-        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var today = Clock.Today;
+        var monthStart = Clock.FromArgentina(new DateTime(today.Year, today.Month, 1));
 
         // La disponibilidad es mensual: solo las reglas vigentes cargadas en el mes actual.
         var rules = await _persistence.GetFiltered<AvailabilityRule>(rule =>
@@ -95,8 +95,8 @@ public class DoctorService : IDoctorService
         if (doctor is null || doctor.Deleted || !doctor.IsActive)
             throw new EntityNotFoundException(DoctorNotFound);
 
-        var rangeStart = fromDate.ToDateTime(TimeOnly.MinValue);
-        var rangeEnd = toDate.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var rangeStart = Clock.FromArgentina(fromDate.ToDateTime(TimeOnly.MinValue));
+        var rangeEnd = Clock.FromArgentina(toDate.AddDays(1).ToDateTime(TimeOnly.MinValue));
         var now = Clock.Now;
 
         var slots = await _persistence.GetFiltered<AvailabilitySlot>(slot =>
@@ -108,11 +108,17 @@ public class DoctorService : IDoctorService
 
         return (slots ?? Enumerable.Empty<AvailabilitySlot>())
             .OrderBy(slot => slot.Start)
-            .Select(slot => new DoctorModel.SlotResponse(
-                slot.Id,
-                DateOnly.FromDateTime(slot.Start).ToString("yyyy-MM-dd"),
-                slot.Start.ToString("HH:mm"),
-                slot.End.ToString("HH:mm")))
+            .Select(slot =>
+            {
+                var start = Clock.ToArgentina(slot.Start);
+                var end = Clock.ToArgentina(slot.End);
+
+                return new DoctorModel.SlotResponse(
+                    slot.Id,
+                    DateOnly.FromDateTime(start).ToString("yyyy-MM-dd"),
+                    start.ToString("HH:mm"),
+                    end.ToString("HH:mm"));
+            })
             .ToList();
     }
     public async Task Delete(Guid id)

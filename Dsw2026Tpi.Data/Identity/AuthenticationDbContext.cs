@@ -21,6 +21,8 @@ public class AuthenticationDbContext: IdentityDbContext
             b.HasIndex(user => user.Dni)
                 .IsUnique()
                 .HasDatabaseName("UX_ApplicationUsers_Dni");
+            b.Property(user => user.FirstName).HasMaxLength(100);
+            b.Property(user => user.LastName).HasMaxLength(100);
         });
         builder.Entity<IdentityUser>(b => { b.ToTable("Users"); });
         builder.Entity<IdentityRole>(b => { b.ToTable("Roles"); });

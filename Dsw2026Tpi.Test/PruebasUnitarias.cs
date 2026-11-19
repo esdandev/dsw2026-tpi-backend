@@ -1,6 +1,7 @@
 ﻿using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Services;
 using Dsw2026Tpi.CrossCutting.Exceptions;
+using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Data.Identity;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
@@ -21,6 +22,17 @@ public class PruebasUnitarias
         _persistence = Substitute.For<IPersistence>();
         _userManager = Substitute.For<UserManager<ApplicationUser>>(Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         _appointmentTest = new AppointmentService(_persistence, _userManager); //Objeto de prueba
+    }
+
+    [Fact]
+    public void Clock_ConvierteEntreArgentinaYUtc_SinPerderLaHoraLocal()
+    {
+        var local = new DateTime(2026, 11, 16, 10, 0, 0);
+        var utc = Clock.FromArgentina(local);
+
+        Assert.Equal(DateTimeKind.Utc, utc.Kind);
+        Assert.Equal(13, utc.Hour);
+        Assert.Equal(local, Clock.ToArgentina(utc));
     }
 
     [Fact]
@@ -148,5 +160,36 @@ public class PruebasUnitarias
         // Assert
         Assert.Equal("BOOKED", result.Status);
         Assert.Equal(SlotStatus.BOOKED, slot.Status);
+    }
+
+    [Fact]
+    public void AdministrativePatient_CuandoTieneNombreYApellido_EntoncesDevuelveElNombreCompleto()
+    {
+        var patient = new ApplicationUser
+        {
+            Dni = 40123456,
+            Email = "paciente@email.com",
+            FirstName = "Ana",
+            LastName = "Gómez"
+        };
+
+        var result = AppointmentModel.AdministrativePatient.From(patient);
+
+        Assert.Equal(40123456, result.Dni);
+        Assert.Equal("Ana Gómez", result.FullName);
+    }
+
+    [Fact]
+    public void AdministrativePatient_CuandoNoTieneNombre_EntoncesDevuelveElEmail()
+    {
+        var patient = new ApplicationUser
+        {
+            Dni = 40123456,
+            Email = "paciente@email.com"
+        };
+
+        var result = AppointmentModel.AdministrativePatient.From(patient);
+
+        Assert.Equal("paciente@email.com", result.FullName);
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Dsw2026Tpi.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using System.Reflection;
 
 namespace Dsw2026Tpi.Data;
@@ -22,6 +23,26 @@ public class Dsw2026TpiDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(Assembly.GetExecutingAssembly());
+        ApplyUtcDateTimes(modelBuilder);
+    }
+
+    private static void ApplyUtcDateTimes(ModelBuilder modelBuilder)
+    {
+        var utc = new ValueConverter<DateTime, DateTime>(
+            value => value.Kind == DateTimeKind.Local ? value.ToUniversalTime() : value,
+            value => DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+        var nullableUtc = new ValueConverter<DateTime?, DateTime?>(
+            value => value.HasValue && value.Value.Kind == DateTimeKind.Local ? value.Value.ToUniversalTime() : value,
+            value => value.HasValue ? DateTime.SpecifyKind(value.Value, DateTimeKind.Utc) : value);
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(entityType => entityType.GetProperties()))
+        {
+            if (property.ClrType == typeof(DateTime))
+                property.SetValueConverter(utc);
+            else if (property.ClrType == typeof(DateTime?))
+                property.SetValueConverter(nullableUtc);
+        }
     }
 
     public override int SaveChanges()

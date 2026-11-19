@@ -8,6 +8,7 @@ public record LoginAdminModel
 
 public record LoginPatientModel
 {
-    public record Request(string Email, long Dni);
+    // Nombre y apellido son opcionales para no romper los logins existentes.
+    public record Request(string Email, long Dni, string? FirstName = null, string? LastName = null);
     public record Response(string? Token, string? Role);
 }
