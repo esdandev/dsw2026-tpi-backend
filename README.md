@@ -26,7 +26,6 @@
 ### Autenticación (`/api/auth`)
 - `POST /api/auth/admin/login` — login de administrador (email + password).
 - `POST /api/auth/patient/login` — login de paciente (email + dni, opcionalmente `firstName` y `lastName`). Si el paciente no existe, se registra automáticamente.
-- `POST /api/auth/admin/register` — registro de administradores (temporal, para pruebas).
 
 ### Especialidades (`/api/specialties`) — requiere token
 - `GET /api/specialties` — listado paginado, filtrable por `name`.
@@ -38,8 +37,8 @@
 - `GET /api/doctors` — listado paginado, filtrable por `name` y `specialtyId`.
 - `GET /api/doctors/{id}/availabilities` — reglas de disponibilidad del mes actual.
 - `GET /api/doctors/{id}/slots?from=&to=` — turnos disponibles del médico en el rango de fechas.
-- `POST /api/doctors` — alta (admin).
-- `PUT /api/doctors/{id}` — modificación (admin).
+- `POST /api/doctors` — alta (admin). Body: `{ "name", "licenseNumber", "specialtyId" }`; `licenseNumber` es obligatorio y único.
+- `PUT /api/doctors/{id}` — modificación (admin), mismo body que el alta.
 - `DELETE /api/doctors/{id}` — baja lógica (admin).
 
 ### Disponibilidades (`/api/availabilities`) — admin
@@ -47,13 +46,14 @@
 - `PUT /api/availabilities` — reemplaza la disponibilidad vigente y regenera los turnos futuros no reservados.
 
 ### Turnos (`/api/appointments`)
-- `POST /api/appointments` — reserva un turno (paciente).
+- `POST /api/appointments` — reserva un turno (paciente). Body: `{ "doctorId", "availabilitySlotId", "patient": { "dni" }, "reason" }`, con `availabilitySlotId` tomado de `GET /api/doctors/{id}/slots`.
 - `DELETE /api/appointments/{id}` — cancela un turno propio (paciente).
 - `GET /api/appointments/patient?dni=` — turnos activos y futuros del paciente autenticado.
-- `GET /api/appointments?date=&status=` — turnos de un día (admin), filtro opcional por estado.
-- `GET /api/appointments/search?...` — búsqueda combinada por especialidad, médico, dni, fecha y estado (admin).
+- `GET /api/appointments?date=` — turnos de un día (admin), con `pageSize` y `pageIndex`.
+- `GET /api/appointments/search?...` — búsqueda combinada por especialidad, médico, dni y fecha (admin), con `pageSize` y `pageIndex`.
 
 ## Notas
 - Todos los endpoints (salvo login) requieren `Authorization: Bearer <token>`.
+- Los listados paginados (`/api/specialties`, `/api/doctors`, `/api/appointments`, `/api/appointments/search`) devuelven `{ pageSize, pageIndex, total, data }`; `total` cuenta los registros activos que cumplen el filtro, no los de la página.
 - Los turnos vistos por un administrador muestran `patient.fullName` con el nombre y apellido cargados en el login. Si el paciente no los tiene (cuentas creadas antes de agregar esos campos), se muestra su email.
-- Los errores siguen el formato `{ errorCode, message, details? }`.
+- Los errores siguen el formato `{ errorCode, message, details? }`, con `details[].field` en camelCase (ej. `pageSize`, `licenseNumber`).

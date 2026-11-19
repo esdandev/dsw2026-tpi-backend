@@ -1,7 +1,6 @@
 ﻿using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using FluentValidation;
-using ValidationException = Dsw2026Tpi.CrossCutting.Exceptions.ValidationException;
 using Microsoft.AspNetCore.Mvc;
 using Dsw2026Tpi.Api.Configurations;
 using Microsoft.AspNetCore.RateLimiting;
@@ -14,14 +13,12 @@ public class AuthenticationController : AppController
     private readonly IAuthenticationService _authenticationService;
     private readonly IValidator<LoginAdminModel.Request> _loginAdminValidator;
     private readonly IValidator<LoginPatientModel.Request> _loginPatientValidator;
-    private readonly IValidator<RegisterAdminModel.Request> _registerValidator;
 
-    public AuthenticationController(IAuthenticationService authenticationService, IValidator<LoginAdminModel.Request> loginAdminValidator, IValidator<LoginPatientModel.Request> loginPatientValidator, IValidator<RegisterAdminModel.Request> registerValidator) 
+    public AuthenticationController(IAuthenticationService authenticationService, IValidator<LoginAdminModel.Request> loginAdminValidator, IValidator<LoginPatientModel.Request> loginPatientValidator) 
     {
         _authenticationService = authenticationService;
         _loginAdminValidator = loginAdminValidator;
         _loginPatientValidator = loginPatientValidator;
-        _registerValidator = registerValidator;
     }
 
     [HttpPost("admin/login")]
@@ -49,18 +46,5 @@ public class AuthenticationController : AppController
 
         var result = await _authenticationService.LoginPatient(request);
         return Ok(result);
-    }
-
-    //Este metodo debe ser eliminado a futuro, o añadirle autorizacion para que solo otros admin puedan registrar a uno nuevo.
-    [HttpPost("admin/register")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<IActionResult> Register([FromBody] RegisterAdminModel.Request request)
-    {
-        var validation = await _registerValidator.ValidateAsync(request);
-        Invalidez(validation);
-
-        var result = await _authenticationService.RegisterAdmin(request);
-        return Ok(result.Email);
     }
 }

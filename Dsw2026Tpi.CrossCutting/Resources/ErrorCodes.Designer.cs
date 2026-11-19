@@ -160,6 +160,15 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
+        ///   Busca una cadena traducida similar a Ya existe un médico con ese número de matrícula.
+        /// </summary>
+        public static string DOCTOR_LICENSE_CONFLICT {
+            get {
+                return ResourceManager.GetString("DOCTOR_LICENSE_CONFLICT", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Busca una cadena traducida similar a Se produjo un error no controlado.
         /// </summary>
         public static string UNHANDLED_ERROR {

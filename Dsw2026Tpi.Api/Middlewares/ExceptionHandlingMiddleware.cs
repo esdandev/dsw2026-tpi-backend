@@ -106,6 +106,11 @@ public class ExceptionHandlingMiddleware
             return CreateConflictError(nameof(ErrorCodes.SPECIALITY_NAME_CONFLICT), ErrorCodes.SPECIALITY_NAME_CONFLICT, "name", "speciality_name_already_exists");
         }
 
+        if (databaseMessage.Contains("UX_Doctors_LicenseNumber", StringComparison.OrdinalIgnoreCase))
+        {
+            return CreateConflictError(nameof(ErrorCodes.DOCTOR_LICENSE_CONFLICT), ErrorCodes.DOCTOR_LICENSE_CONFLICT, "licenseNumber", "license_already_registered");
+        }
+
         if (databaseMessage.Contains("UX_AvailabilitySlots_DoctorId_Start", StringComparison.OrdinalIgnoreCase))
         {
             return CreateConflictError(nameof(ErrorCodes.AVAILABILITY_SLOT_CONFLICT), ErrorCodes.AVAILABILITY_SLOT_CONFLICT, "start", "doctor_slot_already_exists");
