@@ -265,6 +265,176 @@ public class PruebasUnitarias
         Assert.Equal("18:00", result[2].EndTime);
     }
 
+    [Fact]
+    public async Task Create_GeneraSlotsDe30MinParaElRestoDelMesExcluyendoFeriados()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var holidays = Substitute.For<IHolidayProvider>();
+        holidays.IsNonWorkingDay(Arg.Any<DateOnly>())
+            .Returns(call => call.Arg<DateOnly>().DayOfWeek == DayOfWeek.Monday);
+        var service = CrearServicioDeDisponibilidad(persistence, holidays);
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var slots = new List<AvailabilitySlot>();
+        persistence.Add(Arg.Any<AvailabilitySlot>())
+            .Returns(call =>
+            {
+                slots.Add(call.Arg<AvailabilitySlot>());
+                return Task.FromResult(call.Arg<AvailabilitySlot>());
+            });
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "09:00", "10:00"))
+            .ToArray();
+
+        await service.Create(CrearRequestDeDisponibilidad(doctor, days));
+
+        var today = Clock.Today;
+        var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+        var expectedWorkingDays = Enumerable.Range(0, (lastDay - today).Days + 1)
+            .Select(offset => today.AddDays(offset))
+            .Count(date => date.DayOfWeek != DayOfWeek.Monday);
+
+        Assert.Equal(expectedWorkingDays * 2, slots.Count);
+        Assert.All(slots, slot => Assert.Equal(TimeSpan.FromMinutes(30), slot.End - slot.Start));
+        Assert.DoesNotContain(slots, slot => Clock.ToArgentina(slot.Start).DayOfWeek == DayOfWeek.Monday);
+    }
+
+    [Fact]
+    public async Task Create_AceptaDiasConTildeYNormalizaElNombre()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var rules = new List<AvailabilityRule>();
+        persistence.Add(Arg.Any<AvailabilityRule>())
+            .Returns(call =>
+            {
+                rules.Add(call.Arg<AvailabilityRule>());
+                return Task.FromResult(call.Arg<AvailabilityRule>());
+            });
+
+        await service.Create(CrearRequestDeDisponibilidad(
+            doctor, ("MIÉRCOLES", "09:00", "10:00"), ("SÁBADO", "09:00", "10:00")));
+
+        var rule = Assert.Single(rules);
+        Assert.Equal("MIERCOLES,SABADO", rule.DaysOfWeekCsv);
+    }
+
+    [Fact]
+    public async Task Create_CuandoLaHoraDeInicioNoEsMenorALaDeFin_LanzaValidationException()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var act = () => service.Create(CrearRequestDeDisponibilidad(doctor, ("LUNES", "10:00", "09:00")));
+
+        await Assert.ThrowsAsync<ValidationException>(act);
+    }
+
+    [Fact]
+    public async Task Create_CuandoSeSolapaConUnaReglaExistente_LanzaBusinessRuleException()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new AvailabilityService(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var existente = new AvailabilityRule
+        {
+            DoctorId = doctor.Id,
+            DaysOfWeekCsv = "LUNES",
+            StartTime = new TimeSpan(9, 30, 0),
+            EndTime = new TimeSpan(11, 0, 0),
+            EffectiveFrom = Clock.Now,
+            IsActive = true
+        };
+
+        persistence.GetFiltered<AvailabilityRule>(
+                Arg.Any<Expression<Func<AvailabilityRule, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { existente });
+
+        var act = () => service.Create(CrearRequestDeDisponibilidad(doctor, ("LUNES", "09:00", "10:00")));
+
+        var ex = await Assert.ThrowsAsync<BusinessRuleException>(act);
+        Assert.Equal("AVAILABILITY_OVERLAP", ex.Error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Update_ConservaElSlotReservadoYEliminaElDisponibleObsoleto()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var today = Clock.Today;
+        var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+        var reservado = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.FromArgentina(lastDay.AddHours(8)),
+            End = Clock.FromArgentina(lastDay.AddHours(8).AddMinutes(30)),
+            Status = SlotStatus.BOOKED
+        };
+        var obsoleto = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.FromArgentina(lastDay.AddHours(8).AddMinutes(30)),
+            End = Clock.FromArgentina(lastDay.AddHours(9)),
+            Status = SlotStatus.AVAILABLE
+        };
+
+        persistence.GetFiltered<AvailabilitySlot>(
+                Arg.Any<Expression<Func<AvailabilitySlot, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { reservado, obsoleto });
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "09:00", "10:00"))
+            .ToArray();
+
+        await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        await persistence.Received(1).Delete(Arg.Is<AvailabilitySlot>(slot => slot.Id == obsoleto.Id));
+        await persistence.DidNotReceive().Delete(Arg.Is<AvailabilitySlot>(slot => slot.Id == reservado.Id));
+        Assert.Equal(SlotStatus.BOOKED, reservado.Status);
+    }
+
+    private static AvailabilityService CrearServicioDeDisponibilidad(
+        IPersistence persistence, IHolidayProvider holidays)
+    {
+        persistence.GetFiltered<AvailabilityRule>(
+                Arg.Any<Expression<Func<AvailabilityRule, bool>>>(), Arg.Any<string[]>())
+            .Returns(Enumerable.Empty<AvailabilityRule>());
+
+        return new AvailabilityService(persistence, holidays);
+    }
+
+    private static AvailabilityModel.Request CrearRequestDeDisponibilidad(
+        Doctor doctor, params (string Day, string StartTime, string EndTime)[] days) =>
+        new()
+        {
+            DoctorId = doctor.Id.ToString(),
+            Days = days.Select(day => new AvailabilityModel.DayRequest
+            {
+                Day = day.Day,
+                StartTime = day.StartTime,
+                EndTime = day.EndTime
+            })
+        };
+
     private static Doctor CrearDoctor() =>
         new("Dra. Ana López", "MP1234", new Speciality("Clínica", "Clínica médica"));
 }
