@@ -278,12 +278,7 @@ public class PruebasUnitarias
         persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
 
         var slots = new List<AvailabilitySlot>();
-        persistence.Add(Arg.Any<AvailabilitySlot>())
-            .Returns(call =>
-            {
-                slots.Add(call.Arg<AvailabilitySlot>());
-                return Task.FromResult(call.Arg<AvailabilitySlot>());
-            });
+        persistence.AddRange(Arg.Do<IEnumerable<AvailabilitySlot>>(list => slots.AddRange(list)));
 
         var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
             .Select(day => (day, "09:00", "10:00"))
@@ -303,6 +298,7 @@ public class PruebasUnitarias
         Assert.Equal(expectedSlots, slots.Count);
         Assert.All(slots, slot => Assert.Equal(TimeSpan.FromMinutes(30), slot.End - slot.Start));
         Assert.DoesNotContain(slots, slot => Clock.ToArgentina(slot.Start).DayOfWeek == DayOfWeek.Monday);
+        await persistence.Received(1).AddRange(Arg.Any<IEnumerable<AvailabilitySlot>>());
     }
 
     [Fact]
@@ -347,7 +343,7 @@ public class PruebasUnitarias
     public async Task Create_CuandoSeSolapaConUnaReglaExistente_LanzaBusinessRuleException()
     {
         var persistence = Substitute.For<IPersistence>();
-        var service = new AvailabilityService(persistence, Substitute.For<IHolidayProvider>());
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
 
         var doctor = CrearDoctor();
         persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
@@ -425,12 +421,7 @@ public class PruebasUnitarias
         persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
 
         var slots = new List<AvailabilitySlot>();
-        persistence.Add(Arg.Any<AvailabilitySlot>())
-            .Returns(call =>
-            {
-                slots.Add(call.Arg<AvailabilitySlot>());
-                return Task.FromResult(call.Arg<AvailabilitySlot>());
-            });
+        persistence.AddRange(Arg.Do<IEnumerable<AvailabilitySlot>>(list => slots.AddRange(list)));
 
         var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
             .Select(day => (day, "00:00", "23:30"))
@@ -471,6 +462,9 @@ public class PruebasUnitarias
         persistence.GetFiltered<AvailabilityRule>(
                 Arg.Any<Expression<Func<AvailabilityRule, bool>>>(), Arg.Any<string[]>())
             .Returns(Enumerable.Empty<AvailabilityRule>());
+
+        persistence.ExecuteInTransaction(Arg.Any<Func<Task<List<AvailabilityModel.Response>>>>())
+            .Returns(call => call.Arg<Func<Task<List<AvailabilityModel.Response>>>>()());
 
         return new AvailabilityService(persistence, holidays);
     }
