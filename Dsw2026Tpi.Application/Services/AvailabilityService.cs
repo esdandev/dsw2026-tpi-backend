@@ -94,6 +94,7 @@ public class AvailabilityService : IAvailabilityService
 
         var current = fromDate.Date;
         var slotsToAdd = new List<AvailabilitySlot>();
+        var now = Clock.Now;
 
         while (current.Date <= toDate.Date)
         {
@@ -119,21 +120,26 @@ public class AvailabilityService : IAvailabilityService
             while (slotStart.Add(slotDuration) <= current.Add(endTime))
             {
                 var slotEnd = slotStart.Add(slotDuration);
-                var slot = new AvailabilitySlot
+                var startUtc = Clock.FromArgentina(slotStart);
+
+                if (startUtc > now)
                 {
-                    Id = Guid.NewGuid(),
-                    DoctorId = rule.DoctorId,
-                    RuleId = rule.Id,
-                    Start = Clock.FromArgentina(slotStart),
-                    End = Clock.FromArgentina(slotEnd),
-                    Status = SlotStatus.AVAILABLE,
-                    Capacity = rule.Capacity,
-                    BookedCount = 0
-                };
+                    var slot = new AvailabilitySlot
+                    {
+                        Id = Guid.NewGuid(),
+                        DoctorId = rule.DoctorId,
+                        RuleId = rule.Id,
+                        Start = startUtc,
+                        End = Clock.FromArgentina(slotEnd),
+                        Status = SlotStatus.AVAILABLE,
+                        Capacity = rule.Capacity,
+                        BookedCount = 0
+                    };
 
-                slotsToAdd.Add(slot);
+                    slotsToAdd.Add(slot);
+                }
 
-                slotStart = slotStart.Add(slotDuration);
+                slotStart = slotEnd;
             }
 
             current = current.AddDays(1);

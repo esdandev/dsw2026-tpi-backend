@@ -293,11 +293,14 @@ public class PruebasUnitarias
 
         var today = Clock.Today;
         var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
-        var expectedWorkingDays = Enumerable.Range(0, (lastDay - today).Days + 1)
+        var now = Clock.Now;
+        var expectedSlots = Enumerable.Range(0, (lastDay - today).Days + 1)
             .Select(offset => today.AddDays(offset))
-            .Count(date => date.DayOfWeek != DayOfWeek.Monday);
+            .Where(date => date.DayOfWeek != DayOfWeek.Monday)
+            .SelectMany(date => new[] { date.AddHours(9), date.AddHours(9).AddMinutes(30) })
+            .Count(start => Clock.FromArgentina(start) > now);
 
-        Assert.Equal(expectedWorkingDays * 2, slots.Count);
+        Assert.Equal(expectedSlots, slots.Count);
         Assert.All(slots, slot => Assert.Equal(TimeSpan.FromMinutes(30), slot.End - slot.Start));
         Assert.DoesNotContain(slots, slot => Clock.ToArgentina(slot.Start).DayOfWeek == DayOfWeek.Monday);
     }
@@ -410,6 +413,56 @@ public class PruebasUnitarias
         await persistence.Received(1).Delete(Arg.Is<AvailabilitySlot>(slot => slot.Id == obsoleto.Id));
         await persistence.DidNotReceive().Delete(Arg.Is<AvailabilitySlot>(slot => slot.Id == reservado.Id));
         Assert.Equal(SlotStatus.BOOKED, reservado.Status);
+    }
+
+    [Fact]
+    public async Task Create_NoGeneraSlotsVencidosDelDiaActual()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var slots = new List<AvailabilitySlot>();
+        persistence.Add(Arg.Any<AvailabilitySlot>())
+            .Returns(call =>
+            {
+                slots.Add(call.Arg<AvailabilitySlot>());
+                return Task.FromResult(call.Arg<AvailabilitySlot>());
+            });
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "00:00", "23:30"))
+            .ToArray();
+
+        var antes = Clock.Now;
+        await service.Create(CrearRequestDeDisponibilidad(doctor, days));
+
+        Assert.All(slots, slot => Assert.True(slot.Start > antes, $"slot vencido generado: {slot.Start:O}"));
+    }
+
+    [Fact]
+    public async Task AppointmentCreate_CuandoElSlotYaPaso_LanzaValidationException()
+    {
+        var request = new AppointmentModel.CreateRequest(
+            Guid.NewGuid(), Guid.NewGuid(), new AppointmentModel.PatientRequest(40123456), "Control de rutina");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", new Speciality("Cardiología", "Especialidad del corazón"), request.DoctorId);
+        var slot = new AvailabilitySlot
+        {
+            Id = request.AvailabilitySlotId,
+            DoctorId = request.DoctorId,
+            Start = Clock.Now.AddMinutes(-30),
+            End = Clock.Now,
+            Status = SlotStatus.AVAILABLE
+        };
+
+        _persistence.GetById<Doctor>(request.DoctorId).Returns(doctor);
+        _persistence.GetById<AvailabilitySlot>(request.AvailabilitySlotId).Returns(slot);
+
+        var act = () => _appointmentTest.Create(request, "paciente@email.com");
+
+        await Assert.ThrowsAsync<ValidationException>(act);
     }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(

@@ -42,7 +42,7 @@
 - `DELETE /api/doctors/{id}` — baja lógica (admin).
 
 ### Disponibilidades (`/api/availabilities`) — admin
-- `POST /api/availabilities` — carga la disponibilidad semanal de un médico y genera los turnos de 30 minutos del resto del mes en los días indicados. No genera turnos en feriados. Body: `{ "doctorId", "days": [{ "day", "startTime", "endTime" }] }`, con `startTime`/`endTime` en `HH:mm` (inicio menor que fin) y `day` aceptando el nombre con o sin tilde (`MIÉRCOLES`/`MIERCOLES`, `SÁBADO`/`SABADO`).
+- `POST /api/availabilities` — carga la disponibilidad semanal de un médico y genera los turnos de 30 minutos del resto del mes en los días indicados. No genera turnos vencidos ni en feriados. Body: `{ "doctorId", "days": [{ "day", "startTime", "endTime" }] }`, con `startTime`/`endTime` en `HH:mm` (inicio menor que fin) y `day` aceptando el nombre con o sin tilde (`MIÉRCOLES`/`MIERCOLES`, `SÁBADO`/`SABADO`).
 - `PUT /api/availabilities` — mismo body; reemplaza la disponibilidad del mes y regenera los turnos futuros no reservados, conservando los turnos ya reservados.
 - Los horarios que se solapan con otra regla del mismo médico en el mes devuelven `409 AVAILABILITY_OVERLAP`.
 
