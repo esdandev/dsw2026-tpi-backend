@@ -109,14 +109,13 @@ public class AppointmentService : IAppointmentService
             a.AvailabilitySlot.End
         ));
     }
-    public async Task<Pagination<AppointmentModel.AdministrativeResponse>> GetByDate(DateOnly date, int pageSize, int pageIndex, AppointmentStatus? status = null)
+    public async Task<Pagination<AppointmentModel.AdministrativeResponse>> GetByDate(DateOnly date, int pageSize, int pageIndex)
     {
         var dayStart = Clock.FromArgentina(date.ToDateTime(TimeOnly.MinValue));
         var dayEnd = Clock.FromArgentina(date.AddDays(1).ToDateTime(TimeOnly.MinValue));
 
         var (appointments, patients, total, normalizedPageSize, normalizedPageIndex) = await QueryAppointments(
-            appointment => appointment.AvailabilitySlot!.Start >= dayStart && appointment.AvailabilitySlot.Start < dayEnd &&
-            (!status.HasValue || appointment.Status == status.Value),
+            appointment => appointment.AvailabilitySlot!.Start >= dayStart && appointment.AvailabilitySlot.Start < dayEnd,
             pageSize, pageIndex);
 
         var data = appointments.Select(appointment =>
@@ -133,7 +132,7 @@ public class AppointmentService : IAppointmentService
 
         return new Pagination<AppointmentModel.AdministrativeResponse>(normalizedPageSize, normalizedPageIndex, total, data);
     }
-    public async Task<Pagination<AppointmentModel.SearchAdministrativeResponse>> Search(Guid? specialtyId, Guid? doctorId, long? dni, DateOnly? date, int pageSize, int pageIndex, AppointmentStatus? status = null)
+    public async Task<Pagination<AppointmentModel.SearchAdministrativeResponse>> Search(Guid? specialtyId, Guid? doctorId, long? dni, DateOnly? date, int pageSize, int pageIndex)
     {
         string? patientId = null;
 
@@ -157,8 +156,7 @@ public class AppointmentService : IAppointmentService
                 (!specialtyId.HasValue || appointment.AvailabilitySlot!.Doctor!.SpecialityId == specialtyId.Value) &&
                 (!doctorId.HasValue || appointment.AvailabilitySlot!.DoctorId == doctorId.Value) &&
                 (patientId == null || appointment.PatientUserId == patientId) &&
-                (!dayStart.HasValue || (appointment.AvailabilitySlot!.Start >= dayStart.Value && appointment.AvailabilitySlot.Start < dayEnd!.Value)) &&
-                (!status.HasValue || appointment.Status == status.Value),
+                (!dayStart.HasValue || (appointment.AvailabilitySlot!.Start >= dayStart.Value && appointment.AvailabilitySlot.Start < dayEnd!.Value)),
             pageSize, pageIndex);
 
         var data = appointments.Select(appointment =>

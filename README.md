@@ -49,8 +49,8 @@
 - `POST /api/appointments` — reserva un turno (paciente). Body: `{ "doctorId", "availabilitySlotId", "patient": { "dni" }, "reason" }`, con `availabilitySlotId` tomado de `GET /api/doctors/{id}/slots`.
 - `DELETE /api/appointments/{id}` — cancela un turno propio (paciente).
 - `GET /api/appointments/patient?dni=` — turnos activos y futuros del paciente autenticado.
-- `GET /api/appointments?date=&status=` — turnos de un día (admin), filtro opcional por estado.
-- `GET /api/appointments/search?...` — búsqueda combinada por especialidad, médico, dni, fecha y estado (admin).
+- `GET /api/appointments?date=` — turnos de un día (admin), con `pageSize` y `pageIndex`.
+- `GET /api/appointments/search?...` — búsqueda combinada por especialidad, médico, dni y fecha (admin), con `pageSize` y `pageIndex`.
 
 ## Notas
 - Todos los endpoints (salvo login) requieren `Authorization: Bearer <token>`.
