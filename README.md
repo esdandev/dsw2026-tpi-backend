@@ -10,16 +10,22 @@
 
 ## Cómo ejecutar el proyecto localmente
 
-1. Requisitos: .NET 9 SDK, SQL Server (o LocalDB) y un cliente de API (Swagger incluido).
+1. Requisitos: .NET 10 SDK, SQL Server (o LocalDB) y un cliente de API (Swagger incluido).
 2. Cloná el repositorio y pará en la carpeta raíz.
-3. Configurá la cadena de conexión en `Dsw2026Tpi.Api/appsettings.Development.json`, clave `ConnectionStrings:DefaultConnection`.
+3. Configurá los secretos locales con `dotnet user-secrets` (quedan fuera del repositorio):
+   dotnet user-secrets --project Dsw2026Tpi.Api set "ConnectionStrings:DefaultConnection" "<cadena de conexión>"
+   dotnet user-secrets --project Dsw2026Tpi.Api set "Jwt:Key" "<clave aleatoria de al menos 32 caracteres>"
+   dotnet user-secrets --project Dsw2026Tpi.Api set "Seed:Admin:Email" "admin@utn.com"
+   dotnet user-secrets --project Dsw2026Tpi.Api set "Seed:Admin:Password" "Admin123!"
 4. Aplicá las migraciones:
    dotnet ef database update --project Dsw2026Tpi.Data --startup-project Dsw2026Tpi.Api --context Dsw2026TpiDbContext
    dotnet ef database update --project Dsw2026Tpi.Data --startup-project Dsw2026Tpi.Api --context AuthenticationDbContext
 5. Corré la API:
    dotnet run --project Dsw2026Tpi.Api
 6. Abrí `https://localhost:7075/swagger` (o el puerto que indique la consola).
-7. Al iniciar por primera vez se crea un usuario administrador semilla: `admin@utn.com` / `Admin123!`.
+7. Al iniciar sobre una base vacía se crea el administrador configurado en `Seed:Admin:Email` / `Seed:Admin:Password`; si falta alguno, el seed se omite con un warning.
+
+En producción, partí de `appsettings.Production.json.example` (valores vacíos): copialo a `appsettings.Production.json` (ignorado por git) o definí las variables de entorno `ConnectionStrings__DefaultConnection`, `Jwt__Key`, `Seed__Admin__Email` y `Seed__Admin__Password`.
 
 ## Endpoints implementados
 

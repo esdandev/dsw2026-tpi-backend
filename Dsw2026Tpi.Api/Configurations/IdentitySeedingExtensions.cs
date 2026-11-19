@@ -2,6 +2,7 @@
 using Dsw2026Tpi.Api.Configurations;
 using Dsw2026Tpi.Data.Identity;
 using Microsoft.AspNetCore.Identity;
+using Serilog;
 
 namespace Dsw2026Tpi.Api.Configurations;
 
@@ -23,10 +24,18 @@ public static class IdentitySeedingExtensions
     {
         using var scope = app.Services.CreateScope();
 
+        var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var email = configuration["Seed:Admin:Email"];
+        var password = configuration["Seed:Admin:Password"];
+
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
+        {
+            Log.Warning("Seed de administrador omitido: configurá 'Seed:Admin:Email' y 'Seed:Admin:Password'.");
+            return;
+        }
+
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
 
-        const string email = "admin@utn.com";
-        const string password = "Admin123!";
         const long dni = 99999999;
 
         var admin = await userManager.FindByEmailAsync(email);
