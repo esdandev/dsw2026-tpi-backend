@@ -19,10 +19,16 @@ public abstract class AppController : ControllerBase
             var exception = new CrossCutting.Exceptions.ValidationException();
             foreach (var error in validationResult.Errors)
             {
-                exception.WithDetail(error.PropertyName, error.ErrorMessage);
+                exception.WithDetail(ToCamelCase(error.PropertyName), error.ErrorMessage);
             }
             throw exception;
         }
     }
+
+    private static string ToCamelCase(string propertyName) =>
+        string.Join('.', propertyName.Split('.').Select(part =>
+            part.Length > 0 && char.IsUpper(part[0])
+                ? char.ToLowerInvariant(part[0]) + part[1..]
+                : part));
 }
 
