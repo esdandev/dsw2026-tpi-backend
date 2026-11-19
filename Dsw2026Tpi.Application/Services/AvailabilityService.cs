@@ -274,10 +274,14 @@ public class AvailabilityService : IAvailabilityService
 
         if (slotIds.Count > 0)
         {
-            var appointments = await _persistence.GetFiltered<Appointment>(appointment => slotIds.Contains(appointment.AvailabilitySlotId));
+            var appointments = await _persistence.GetFiltered<Appointment>(appointment =>
+                slotIds.Contains(appointment.AvailabilitySlotId));
 
             if (appointments != null)
-                referencedSlotIds = appointments.Select(appointment => appointment.AvailabilitySlotId).ToHashSet();
+                referencedSlotIds = appointments
+                    .Where(appointment => appointment.Status != AppointmentStatus.CANCELLED)
+                    .Select(appointment => appointment.AvailabilitySlotId)
+                    .ToHashSet();
         }
 
         var existingSlotsByStart = existingSlots.ToDictionary(slot => slot.Start, slot => slot);

@@ -456,6 +456,45 @@ public class PruebasUnitarias
         await Assert.ThrowsAsync<ValidationException>(act);
     }
 
+    [Fact]
+    public async Task Update_CuandoElTurnoEstaCancelado_EntoncesBorraElSlotEnVezDeBloquearlo()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var today = Clock.Today;
+        var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.FromArgentina(lastDay.AddHours(8)),
+            End = Clock.FromArgentina(lastDay.AddHours(8).AddMinutes(30)),
+            Status = SlotStatus.AVAILABLE
+        };
+        var cancelado = new Appointment(slot, "paciente", "Control de rutina");
+        cancelado.Cancel();
+
+        persistence.GetFiltered<AvailabilitySlot>(
+                Arg.Any<Expression<Func<AvailabilitySlot, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { slot });
+        persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { cancelado });
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "09:00", "10:00"))
+            .ToArray();
+
+        await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        await persistence.Received(1).Delete(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
+        await persistence.DidNotReceive().Update(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
+    }
+
     private static AvailabilityService CrearServicioDeDisponibilidad(
         IPersistence persistence, IHolidayProvider holidays)
     {
