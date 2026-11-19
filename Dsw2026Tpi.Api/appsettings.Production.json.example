@@ -1,0 +1,17 @@
+{
+  "ConnectionStrings": {
+    "DefaultConnection": ""
+  },
+  "Jwt": {
+    "Key": "",
+    "Issuer": "Dsw2026Tpi.Api",
+    "Audience": "Dsw2026Tpi.ApiUsers",
+    "ExpiresInMinutes": 60
+  },
+  "Seed": {
+    "Admin": {
+      "Email": "",
+      "Password": ""
+    }
+  }
+}

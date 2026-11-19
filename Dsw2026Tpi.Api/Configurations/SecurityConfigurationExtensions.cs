@@ -19,7 +19,12 @@ public static class SecurityConfigurationExtensions
             .GetSection(JwtOptions.SectionName)
             .Get<JwtOptions>() ?? throw new InvalidOperationException($"No se encontró la sección de configuración '{JwtOptions.SectionName}'.");
 
-        if (string.IsNullOrWhiteSpace(jwtOptions.Key)) throw new ArgumentNullException("JWT Key");
+        if (string.IsNullOrWhiteSpace(jwtOptions.Key))
+            throw new InvalidOperationException("Falta configurar 'Jwt:Key'. En desarrollo usá 'dotnet user-secrets'; en producción, la variable de entorno 'Jwt__Key'.");
+
+        if (jwtOptions.Key.Length < 32)
+            throw new InvalidOperationException("'Jwt:Key' debe tener al menos 32 caracteres.");
+
         if (string.IsNullOrWhiteSpace(jwtOptions.Issuer)) throw new ArgumentNullException("JWT Issuer");
         if (string.IsNullOrWhiteSpace(jwtOptions.Audience)) throw new ArgumentNullException("JWT Audience");
 

@@ -14,6 +14,9 @@ public static class PersistenceConfigurationExtensions
         //Obtener cadena de conexión desde appsettings.json
         var connectionString = configuration.GetConnectionString("DefaultConnection");
 
+        if (string.IsNullOrWhiteSpace(connectionString))
+            throw new InvalidOperationException("Falta configurar 'ConnectionStrings:DefaultConnection'. En desarrollo usá 'dotnet user-secrets'; en producción, la variable de entorno 'ConnectionStrings__DefaultConnection'.");
+
         //Agregar contexto (O/RM) y utilizar SQL Server para DB
         services.AddDbContext<Dsw2026TpiDbContext>(options =>
         {
