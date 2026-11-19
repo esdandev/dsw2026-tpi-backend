@@ -543,6 +543,87 @@ public class PruebasUnitarias
         Assert.False(result.IsValid);
     }
 
+    [Fact]
+    public async Task SpecialityService_Create_RecortaNombreYDescripcion()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new SpecialityService(persistence);
+        Speciality? creada = null;
+        persistence.Add(Arg.Do<Speciality>(speciality => creada = speciality));
+
+        await service.Create(new SpecialityModel.Request("  Cardiología  ", "  Especialidad del corazón  "));
+
+        Assert.Equal("Cardiología", creada!.Name);
+        Assert.Equal("Especialidad del corazón", creada.Description);
+    }
+
+    [Fact]
+    public async Task SpecialityService_Delete_CuandoTieneMedicosActivos_LanzaConflictException()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new SpecialityService(persistence);
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Test", "MP-1", speciality);
+
+        persistence.GetById<Speciality>(speciality.Id).Returns(speciality);
+        persistence.GetFiltered<Doctor>(
+                Arg.Any<Expression<Func<Doctor, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { doctor });
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => service.Delete(speciality.Id));
+
+        Assert.Equal("SPECIALITY_IN_USE", ex.Error.ErrorCode);
+    }
+
+    [Fact]
+    public async Task SpecialityService_Delete_SinMedicosActivos_MarcaComoEliminada()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new SpecialityService(persistence);
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+
+        persistence.GetById<Speciality>(speciality.Id).Returns(speciality);
+        persistence.GetFiltered<Doctor>(
+                Arg.Any<Expression<Func<Doctor, bool>>>(), Arg.Any<string[]>())
+            .Returns(Enumerable.Empty<Doctor>());
+
+        await service.Delete(speciality.Id);
+
+        Assert.True(speciality.Deleted);
+        await persistence.Received(1).Update(speciality);
+    }
+
+    [Fact]
+    public async Task DoctorService_Create_RecortaNombreYMatricula()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new DoctorService(persistence);
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        persistence.GetById<Speciality>(speciality.Id).Returns(speciality);
+
+        Doctor? creado = null;
+        persistence.Add(Arg.Do<Doctor>(doctor => creado = doctor));
+
+        await service.Create(new DoctorModel.Request("  Dr. Test  ", "  MP-1  ", speciality.Id));
+
+        Assert.Equal("Dr. Test", creado!.Name);
+        Assert.Equal("MP-1", creado.LicenseNumber);
+    }
+
+    [Fact]
+    public async Task DoctorService_Create_CuandoLaEspecialidadNoExiste_UsaSpecialityComoEntidad()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new DoctorService(persistence);
+        persistence.GetById<Speciality>(Arg.Any<Guid>()).Returns((Speciality?)null);
+
+        var ex = await Assert.ThrowsAsync<EntityNotFoundException>(() =>
+            service.Create(new DoctorModel.Request("Dr. Test", "MP-1", Guid.NewGuid())));
+
+        Assert.Contains("Speciality", ex.Error.Message);
+        Assert.DoesNotContain("SpecialityId", ex.Error.Message);
+    }
+
     private static AvailabilityService CrearServicioDeDisponibilidad(
         IPersistence persistence, IHolidayProvider holidays)
     {

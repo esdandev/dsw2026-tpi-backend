@@ -11,7 +11,7 @@ public class DoctorService : IDoctorService
 {
     private readonly IPersistence _persistence;
     private const string DoctorNotFound = "Doctor";
-    private const string SpecialityNotFound = "SpecialityId";
+    private const string SpecialityNotFound = "Speciality";
 
     public DoctorService(IPersistence persistence)
     {
@@ -19,7 +19,7 @@ public class DoctorService : IDoctorService
     }
     public async Task<Pagination<DoctorModel.Response>> GetAll(int pageSize, int pageIndex, string? name = null, Guid? specialtyId = null)
     {
-        var doctors = await _persistence.Paginate<Doctor, string>(pageSize, pageIndex, d => !d.Deleted && d.IsActive && (string.IsNullOrWhiteSpace(name) || d.Name.Contains(name)) && (!specialtyId.HasValue || d.SpecialityId == specialtyId.Value), d => d.Name, nameof(Doctor.Speciality));
+        var doctors = await _persistence.Paginate<Doctor, string>(pageSize, pageIndex, d => !d.Deleted && d.IsActive && (d.Speciality == null || !d.Speciality.Deleted) && (string.IsNullOrWhiteSpace(name) || d.Name.Contains(name)) && (!specialtyId.HasValue || d.SpecialityId == specialtyId.Value), d => d.Name, nameof(Doctor.Speciality));
         return doctors.Map(MapResponse);
     }
     public async Task<DoctorModel.Response> Create(DoctorModel.Request request)
@@ -29,7 +29,7 @@ public class DoctorService : IDoctorService
         if (speciality is null || speciality.Deleted)
             throw new EntityNotFoundException(SpecialityNotFound);
 
-        var doctor = new Doctor( request.Name, request.LicenseNumber, speciality);
+        var doctor = new Doctor( request.Name.Trim(), request.LicenseNumber.Trim(), speciality);
         await _persistence.Add(doctor);
 
         return MapResponse(doctor);
@@ -46,7 +46,7 @@ public class DoctorService : IDoctorService
         if (speciality is null || speciality.Deleted)
             throw new EntityNotFoundException(SpecialityNotFound);
 
-        doctor.UpdateDetails(request.Name, request.LicenseNumber, speciality);
+        doctor.UpdateDetails(request.Name.Trim(), request.LicenseNumber.Trim(), speciality);
         await _persistence.Update(doctor);
 
         return MapResponse(doctor);

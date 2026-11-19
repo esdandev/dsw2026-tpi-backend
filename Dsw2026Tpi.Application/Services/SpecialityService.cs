@@ -1,6 +1,7 @@
 ﻿using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.CrossCutting.Exceptions;
+using Dsw2026Tpi.CrossCutting.Resources;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using System;
@@ -11,14 +12,14 @@ namespace Dsw2026Tpi.Application.Services;
     public class SpecialityService : ISpecialityService
     {
         private readonly IPersistence _persistence;
-        private const string SpecialityId = "SpecialityId";
+        private const string SpecialityNotFound = "Speciality";
         public SpecialityService(IPersistence persistence)
         {
             _persistence = persistence;
         }
         public async Task<SpecialityModel.Response> Create(SpecialityModel.Request request)
         {
-            var speciality = new Speciality(request.Name, request.Description);
+            var speciality = new Speciality(request.Name.Trim(), request.Description.Trim());
             await _persistence.Add<Speciality>(speciality);
             return new SpecialityModel.Response(speciality.Id, speciality.Name, speciality.Description);
         }
@@ -27,7 +28,13 @@ namespace Dsw2026Tpi.Application.Services;
            var speciality = await _persistence.GetById<Speciality>(id);
 
            if (speciality is null || speciality.Deleted)
-                throw new EntityNotFoundException(SpecialityId);
+                throw new EntityNotFoundException(SpecialityNotFound);
+
+            var activeDoctors = await _persistence.GetFiltered<Doctor>(doctor =>
+                doctor.SpecialityId == id && !doctor.Deleted && doctor.IsActive);
+
+            if (activeDoctors != null && activeDoctors.Any())
+                throw new ConflictException(nameof(ErrorCodes.SPECIALITY_IN_USE), ErrorCodes.SPECIALITY_IN_USE);
 
             speciality.MarkAsDeleted();
             await _persistence.Update<Speciality>(speciality);
@@ -44,12 +51,12 @@ namespace Dsw2026Tpi.Application.Services;
             var speciality = await _persistence.GetById<Speciality>(id);
 
             if (speciality is null)
-                throw new EntityNotFoundException(SpecialityId);
+                throw new EntityNotFoundException(SpecialityNotFound);
 
             if (speciality.Deleted)
-                throw new EntityNotFoundException(SpecialityId);
+                throw new EntityNotFoundException(SpecialityNotFound);
 
-            speciality.UpdateDetails(request.Name, request.Description);
+            speciality.UpdateDetails(request.Name.Trim(), request.Description.Trim());
             await _persistence.Update<Speciality>(speciality);
 
             return new SpecialityModel.Response(speciality.Id, speciality.Name, speciality.Description);
