@@ -1,4 +1,5 @@
-﻿using Dsw2026Tpi.Application.Dtos;
+﻿using System.Linq.Expressions;
+using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Services;
 using Dsw2026Tpi.CrossCutting.Exceptions;
 using Dsw2026Tpi.CrossCutting.Helpers;
@@ -192,4 +193,78 @@ public class PruebasUnitarias
 
         Assert.Equal("paciente@email.com", result.FullName);
     }
+
+    [Fact]
+    public async Task GetAvailabilities_CuandoElMedicoNoExiste_EntoncesLanzaEntityNotFoundException()
+    {
+        var service = new DoctorService(_persistence);
+        _persistence.GetById<Doctor>(Arg.Any<Guid>()).Returns((Doctor?)null);
+
+        var act = () => service.GetAvailabilities(Guid.NewGuid());
+
+        await Assert.ThrowsAsync<EntityNotFoundException>(act);
+    }
+
+    [Fact]
+    public async Task GetAvailabilities_CuandoElMedicoNoTieneReglasDelMes_EntoncesDevuelveVacio()
+    {
+        var doctor = CrearDoctor();
+        var service = new DoctorService(_persistence);
+
+        _persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+        _persistence.GetFiltered<AvailabilityRule>(
+                Arg.Any<Expression<Func<AvailabilityRule, bool>>>(), Arg.Any<string[]>())
+            .Returns(Enumerable.Empty<AvailabilityRule>());
+
+        var result = await service.GetAvailabilities(doctor.Id);
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public async Task GetAvailabilities_DevuelveUnaEntradaPorDiaConIdYHoraDe24Horas()
+    {
+        var doctor = CrearDoctor();
+        var service = new DoctorService(_persistence);
+        var manana = new AvailabilityRule
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            DaysOfWeekCsv = "LUNES,MIERCOLES",
+            StartTime = new TimeSpan(9, 0, 0),
+            EndTime = new TimeSpan(12, 0, 0),
+            IsActive = true,
+            EffectiveFrom = Clock.Now
+        };
+        var tarde = new AvailabilityRule
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            DaysOfWeekCsv = "JUEVES",
+            StartTime = new TimeSpan(14, 0, 0),
+            EndTime = new TimeSpan(18, 0, 0),
+            IsActive = true,
+            EffectiveFrom = Clock.Now
+        };
+
+        _persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+        _persistence.GetFiltered<AvailabilityRule>(
+                Arg.Any<Expression<Func<AvailabilityRule, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { tarde, manana });
+
+        var result = (await service.GetAvailabilities(doctor.Id)).ToList();
+
+        Assert.Equal(3, result.Count);
+        Assert.Equal(manana.Id, result[0].Id);
+        Assert.Equal("LUNES", result[0].Day);
+        Assert.Equal("09:00", result[0].StartTime);
+        Assert.Equal("12:00", result[0].EndTime);
+        Assert.Equal("MIÉRCOLES", result[1].Day);
+        Assert.Equal(tarde.Id, result[2].Id);
+        Assert.Equal("14:00", result[2].StartTime);
+        Assert.Equal("18:00", result[2].EndTime);
+    }
+
+    private static Doctor CrearDoctor() =>
+        new("Dra. Ana López", "MP1234", new Speciality("Clínica", "Clínica médica"));
 }
