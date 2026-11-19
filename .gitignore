@@ -365,3 +365,6 @@ FodyWeavers.xsd
 
 # Instrucciones locales para agentes
 AGENTS.md
+
+# Configuración local de producción (contiene secretos)
+Dsw2026Tpi.Api/appsettings.Production.json
