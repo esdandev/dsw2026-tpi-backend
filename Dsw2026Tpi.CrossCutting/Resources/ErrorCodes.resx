@@ -144,6 +144,9 @@
   <data name="SPECIALITY_NAME_CONFLICT" xml:space="preserve">
     <value>Ya existe una especialidad con ese nombre</value>
   </data>
+  <data name="DOCTOR_LICENSE_CONFLICT" xml:space="preserve">
+    <value>Ya existe un médico con ese número de matrícula</value>
+  </data>
   <data name="AVAILABILITY_SLOT_CONFLICT" xml:space="preserve">
     <value>Ya existe un turno para el médico en ese horario</value>
   </data>

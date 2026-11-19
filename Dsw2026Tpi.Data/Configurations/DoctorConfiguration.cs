@@ -18,6 +18,10 @@ public class DoctorConfiguration : IEntityTypeConfiguration<Doctor>
             .IsRequired()
             .HasMaxLength(50);
 
+        builder.HasIndex(x => x.LicenseNumber)
+            .IsUnique()
+            .HasDatabaseName("UX_Doctors_LicenseNumber");
+
         builder.HasOne(x => x.Speciality)
      .WithMany()
      .HasForeignKey(x => x.SpecialityId)

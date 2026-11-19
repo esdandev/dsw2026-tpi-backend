@@ -37,8 +37,8 @@
 - `GET /api/doctors` — listado paginado, filtrable por `name` y `specialtyId`.
 - `GET /api/doctors/{id}/availabilities` — reglas de disponibilidad del mes actual.
 - `GET /api/doctors/{id}/slots?from=&to=` — turnos disponibles del médico en el rango de fechas.
-- `POST /api/doctors` — alta (admin).
-- `PUT /api/doctors/{id}` — modificación (admin).
+- `POST /api/doctors` — alta (admin). Body: `{ "name", "licenseNumber", "specialtyId" }`; `licenseNumber` es obligatorio y único.
+- `PUT /api/doctors/{id}` — modificación (admin), mismo body que el alta.
 - `DELETE /api/doctors/{id}` — baja lógica (admin).
 
 ### Disponibilidades (`/api/availabilities`) — admin

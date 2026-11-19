@@ -205,6 +205,10 @@ namespace Dsw2026Tpi.Data.Migrations.Application
 
                     b.HasKey("Id");
 
+                    b.HasIndex("LicenseNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Doctors_LicenseNumber");
+
                     b.HasIndex("SpecialityId");
 
                     b.ToTable("Doctors", (string)null);
