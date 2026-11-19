@@ -54,5 +54,6 @@
 
 ## Notas
 - Todos los endpoints (salvo login) requieren `Authorization: Bearer <token>`.
+- Los listados paginados (`/api/specialties`, `/api/doctors`, `/api/appointments`, `/api/appointments/search`) devuelven `{ pageSize, pageIndex, total, data }`; `total` cuenta los registros activos que cumplen el filtro, no los de la página.
 - Los turnos vistos por un administrador muestran `patient.fullName` con el nombre y apellido cargados en el login. Si el paciente no los tiene (cuentas creadas antes de agregar esos campos), se muestra su email.
 - Los errores siguen el formato `{ errorCode, message, details? }`.
