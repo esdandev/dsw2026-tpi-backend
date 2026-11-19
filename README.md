@@ -47,7 +47,7 @@
 - `PUT /api/availabilities` — reemplaza la disponibilidad vigente y regenera los turnos futuros no reservados.
 
 ### Turnos (`/api/appointments`)
-- `POST /api/appointments` — reserva un turno (paciente).
+- `POST /api/appointments` — reserva un turno (paciente). Body: `{ "doctorId", "availabilitySlotId", "patient": { "dni" }, "reason" }`, con `availabilitySlotId` tomado de `GET /api/doctors/{id}/slots`.
 - `DELETE /api/appointments/{id}` — cancela un turno propio (paciente).
 - `GET /api/appointments/patient?dni=` — turnos activos y futuros del paciente autenticado.
 - `GET /api/appointments?date=&status=` — turnos de un día (admin), filtro opcional por estado.
