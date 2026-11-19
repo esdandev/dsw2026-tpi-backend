@@ -37,10 +37,9 @@ public static class DependencyInjectionConfigurationExtensions
         services.AddScoped<IValidator<DoctorModel.Request>, DoctorRequestValidator>();
         services.AddScoped<IValidator<DoctorModel.GetAllQuery>, DoctorGetAllQueryValidator>();
 
-        //Fluent validation register y login
+        //Fluent validation login
         services.AddScoped<IValidator<LoginAdminModel.Request>, LoginAdminValidator>();
         services.AddScoped<IValidator<LoginPatientModel.Request>, LoginPatientValidator>();
-        services.AddScoped<IValidator<RegisterAdminModel.Request>, RegisterValidator>();//Eliminar a futuro
 
         return services;
     }

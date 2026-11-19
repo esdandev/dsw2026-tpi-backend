@@ -2,7 +2,6 @@
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.CrossCutting.Exceptions;
 using Dsw2026Tpi.CrossCutting.Identity;
-using Dsw2026Tpi.CrossCutting.Resources;
 using Dsw2026Tpi.Data.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
@@ -103,25 +102,5 @@ public class AuthenticationService : IAuthenticationService
         var token = _jwtService.GenerateToken(user.UserName!, Roles.Patient);
 
         return new LoginPatientModel.Response(token, Roles.Patient.ToUpperInvariant());
-    }
-    public async Task<RegisterAdminModel.Response> RegisterAdmin(RegisterAdminModel.Request request)
-    {
-        var user = new ApplicationUser
-        {
-            UserName = request.Email,
-            Email = request.Email,
-        };
-
-        var result = await _userManager.CreateAsync(user, request.Password);
-
-        if (!result.Succeeded) throw new ConflictException(nameof(ErrorCodes.REGISTER_USER_CONFLICT),
-            ErrorCodes.REGISTER_USER_CONFLICT)
-                .WithDetail(result.Errors.Select(e => (e.Code, e.Description)));
-
-        _ = await _userManager.AddToRoleAsync(user, Roles.Administrator);
-
-        _logger.LogInformation("Usuario registrado: {Email}", request.Email);
-
-        return new RegisterAdminModel.Response(request.Email);
     }
 }

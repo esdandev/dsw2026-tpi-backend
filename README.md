@@ -26,7 +26,6 @@
 ### Autenticación (`/api/auth`)
 - `POST /api/auth/admin/login` — login de administrador (email + password).
 - `POST /api/auth/patient/login` — login de paciente (email + dni, opcionalmente `firstName` y `lastName`). Si el paciente no existe, se registra automáticamente.
-- `POST /api/auth/admin/register` — registro de administradores (temporal, para pruebas).
 
 ### Especialidades (`/api/specialties`) — requiere token
 - `GET /api/specialties` — listado paginado, filtrable por `name`.
