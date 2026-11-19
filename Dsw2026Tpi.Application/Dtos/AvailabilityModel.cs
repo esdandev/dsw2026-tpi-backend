@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.ComponentModel.DataAnnotations;
 using System.ComponentModel;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -11,17 +10,12 @@ public static class AvailabilityModel
 {
     public class DayRequest
     {
-        [Required]
         [JsonPropertyName("day")]
         [DefaultValue("string")]
         public string Day { get; set; } = "string";
-
-        [Required]
         [JsonPropertyName("startTime")]
         [DefaultValue("HH:mm")]
         public string StartTime { get; set; } = "HH:mm";
-
-        [Required]
         [JsonPropertyName("endTime")]
         [DefaultValue("HH:mm")]
         public string EndTime { get; set; } = "HH:mm";
@@ -29,11 +23,9 @@ public static class AvailabilityModel
 
     public class Request
     {
-        [Required]
         [JsonPropertyName("doctorId")]
         [DefaultValue("Guid")]
         public string DoctorId { get; set; } = "Guid";
-        [Required]
         [JsonPropertyName("days")]
         public IEnumerable<DayRequest> Days { get; set; } = Enumerable.Empty<DayRequest>();
     }

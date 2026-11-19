@@ -1,6 +1,7 @@
 ﻿using System.Linq.Expressions;
 using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Services;
+using Dsw2026Tpi.Application.Validators;
 using Dsw2026Tpi.CrossCutting.Exceptions;
 using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Data.Identity;
@@ -493,6 +494,53 @@ public class PruebasUnitarias
 
         await persistence.Received(1).Delete(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
         await persistence.DidNotReceive().Update(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
+    }
+
+    [Theory]
+    [InlineData(9, false)]
+    [InlineData(10, true)]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    public void SpecialityRequestValidator_ValidaLongitudDeDescripcion(int length, bool valida)
+    {
+        var validator = new SpecialityRequestValidator();
+        var request = new SpecialityModel.Request("Cardiología", new string('a', length));
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valida, result.IsValid);
+    }
+
+    [Fact]
+    public void DayRequestValidator_CuandoElDiaEstaVacio_DevuelveMensajeEnEspanol()
+    {
+        var validator = new DayRequestValidator();
+        var result = validator.Validate(new AvailabilityModel.DayRequest
+        {
+            Day = "",
+            StartTime = "09:00",
+            EndTime = "10:00"
+        });
+
+        Assert.False(result.IsValid);
+        Assert.Equal("se requiere el día de la semana", Assert.Single(result.Errors).ErrorMessage);
+    }
+
+    [Theory]
+    [InlineData("9:00")]
+    [InlineData("24:00")]
+    [InlineData("09:60")]
+    public void DayRequestValidator_CuandoLaHoraNoEsHHmm_EsInvalida(string hora)
+    {
+        var validator = new DayRequestValidator();
+        var result = validator.Validate(new AvailabilityModel.DayRequest
+        {
+            Day = "LUNES",
+            StartTime = hora,
+            EndTime = "10:00"
+        });
+
+        Assert.False(result.IsValid);
     }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(

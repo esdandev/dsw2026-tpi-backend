@@ -24,7 +24,9 @@ public class DayRequestValidator : AbstractValidator<AvailabilityModel.DayReques
 {
     public DayRequestValidator()
     {
-        RuleFor(x => x.Day).NotEmpty();
+        RuleFor(x => x.Day)
+            .NotEmpty()
+            .WithMessage("se requiere el día de la semana");
 
         RuleFor(x => x.StartTime)
             .Matches(@"^([01]\d|2[0-3]):[0-5]\d$")
