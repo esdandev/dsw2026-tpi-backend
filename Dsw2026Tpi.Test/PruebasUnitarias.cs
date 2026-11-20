@@ -9,6 +9,7 @@ using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Data.Identity;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -791,6 +792,31 @@ public class PruebasUnitarias
 
         // Assert
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task SecurityHeadersMiddleware_AgregaHeadersYElCspSoloEnProduccion()
+    {
+        var development = new DefaultHttpContext();
+        var developmentEnvironment = Substitute.For<IWebHostEnvironment>();
+        developmentEnvironment.EnvironmentName.Returns("Development");
+
+        await new SecurityHeadersMiddleware(_ => Task.CompletedTask, developmentEnvironment)
+            .InvokeAsync(development);
+
+        Assert.Equal("nosniff", development.Response.Headers["X-Content-Type-Options"].ToString());
+        Assert.Equal("DENY", development.Response.Headers["X-Frame-Options"].ToString());
+        Assert.Equal("no-referrer", development.Response.Headers["Referrer-Policy"].ToString());
+        Assert.False(development.Response.Headers.ContainsKey("Content-Security-Policy"));
+
+        var production = new DefaultHttpContext();
+        var productionEnvironment = Substitute.For<IWebHostEnvironment>();
+        productionEnvironment.EnvironmentName.Returns("Production");
+
+        await new SecurityHeadersMiddleware(_ => Task.CompletedTask, productionEnvironment)
+            .InvokeAsync(production);
+
+        Assert.Equal("default-src 'none'; frame-ancestors 'none'", production.Response.Headers["Content-Security-Policy"].ToString());
     }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(
