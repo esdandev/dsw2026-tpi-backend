@@ -55,6 +55,7 @@ public class Program
 
             await app.SeedIdentityAsync();
 
+            app.UseAppForwardedHeaders(builder.Configuration);
             app.UseMiddleware<SecurityHeadersMiddleware>();
             app.UseMiddleware<ExceptionHandlingMiddleware>();
             app.UseSerilogRequestLogging();
