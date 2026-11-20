@@ -10,6 +10,13 @@ using Dsw2026Tpi.Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using NSubstitute;
 using Xunit;
+using System.Security.Claims;
+using Dsw2026Tpi.Api.Controllers;
+using Dsw2026Tpi.Api.Middlewares;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -22,6 +29,11 @@ public class PruebasUnitarias
     public PruebasUnitarias()
     {
         _persistence = Substitute.For<IPersistence>();
+        _persistence.ExecuteInTransaction(Arg.Any<Func<Task<AppointmentModel.CreateResponse>>>())
+            .Returns(call => call.Arg<Func<Task<AppointmentModel.CreateResponse>>>()());
+        _persistence.ExecuteInTransaction(Arg.Any<Func<Task>>())
+            .Returns(call => call.Arg<Func<Task>>()());
+
         _userManager = Substitute.For<UserManager<ApplicationUser>>(Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         _appointmentTest = new AppointmentService(_persistence, _userManager); //Objeto de prueba
     }
@@ -622,6 +634,155 @@ public class PruebasUnitarias
 
         Assert.Contains("Speciality", ex.Error.Message);
         Assert.DoesNotContain("SpecialityId", ex.Error.Message);
+    }
+    [Fact]
+    public async Task AppointmentCreate_DosReservasSimultaneas_UnaDevuelve201YOtra409()
+    {
+        // Arrange
+        var doctorId = Guid.NewGuid();
+        var slotId = Guid.NewGuid();
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", speciality, doctorId);
+
+        var slotStart = DateTime.UtcNow.AddDays(1);
+        var slotEnd = slotStart.AddMinutes(30);
+
+        var paciente1 = new ApplicationUser { Id = "p1", UserName = "p1@email.com", Email = "p1@email.com", Dni = 40111111 };
+        var paciente2 = new ApplicationUser { Id = "p2", UserName = "p2@email.com", Email = "p2@email.com", Dni = 40222222 };
+
+        var persistence = Substitute.For<IPersistence>();
+        persistence.ExecuteInTransaction(Arg.Any<Func<Task<AppointmentModel.CreateResponse>>>())
+            .Returns(call => call.Arg<Func<Task<AppointmentModel.CreateResponse>>>()());
+        persistence.GetById<Doctor>(doctorId).Returns(doctor);
+
+        // Simula dos lecturas concurrentes del mismo slot disponible (como dos DbContext en paralelo)
+        var ambasLecturasListas = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var contadorLecturas = 0;
+        persistence.GetById<AvailabilitySlot>(slotId).Returns(async _ =>
+        {
+            var copiaSlot = new AvailabilitySlot
+            {
+                Id = slotId,
+                DoctorId = doctorId,
+                Start = slotStart,
+                End = slotEnd,
+                Status = SlotStatus.AVAILABLE
+            };
+
+            if (Interlocked.Increment(ref contadorLecturas) == 2)
+                ambasLecturasListas.TrySetResult();
+
+            await ambasLecturasListas.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            return copiaSlot;
+        });
+
+        // Solo el primer Update pasa; el segundo falla por RowVersion (DbUpdateConcurrencyException)
+        var yaReservado = 0;
+        persistence.Update(Arg.Any<AvailabilitySlot>()).Returns(call =>
+        {
+            if (Interlocked.Exchange(ref yaReservado, 1) == 1)
+                return Task.FromException<AvailabilitySlot>(
+                    new DbUpdateConcurrencyException("Conflicto de concurrencia en AvailabilitySlot"));
+
+            return Task.FromResult(call.Arg<AvailabilitySlot>());
+        });
+
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        userManager.FindByNameAsync(paciente1.UserName!).Returns(paciente1);
+        userManager.FindByNameAsync(paciente2.UserName!).Returns(paciente2);
+
+        var service = new AppointmentService(persistence, userManager);
+        var middlewareLogger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+
+        async Task<int> EjecutarReservaHttp(ApplicationUser paciente)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Response.Body = new MemoryStream();
+            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, paciente.UserName!)], "TestAuth"));
+
+            var controller = new AppointmentController(
+                service,
+                new AppointmentCreateRequestValidator(),
+                new AppointmentGetByDateQueryValidator(),
+                new AppointmentSearchQueryValidator())
+            {
+                ControllerContext = new ControllerContext { HttpContext = httpContext }
+            };
+
+            var request = new AppointmentModel.CreateRequest(
+                doctorId,
+                slotId,
+                new AppointmentModel.PatientRequest(paciente.Dni),
+                "Control de rutina");
+
+            var middleware = new ExceptionHandlingMiddleware(async ctx =>
+            {
+                var actionResult = await controller.Create(request);
+                if (actionResult is ObjectResult objectResult && objectResult.StatusCode.HasValue)
+                    ctx.Response.StatusCode = objectResult.StatusCode.Value;
+            }, middlewareLogger);
+
+            await middleware.InvokeAsync(httpContext);
+            return httpContext.Response.StatusCode;
+        }
+
+        // Act
+        var statusCodes = await Task.WhenAll(
+            EjecutarReservaHttp(paciente1),
+            EjecutarReservaHttp(paciente2));
+
+        // Assert
+        Assert.Contains(StatusCodes.Status201Created, statusCodes);
+        Assert.Contains(StatusCodes.Status409Conflict, statusCodes);
+        await persistence.Received(1).Add(Arg.Any<Appointment>());
+    }
+
+    [Fact]
+    public async Task AppointmentCancel_CuandoHayConflictoDeConcurrencia_LanzaConflictException()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = DateTime.UtcNow.AddDays(1),
+            End = DateTime.UtcNow.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+        _persistence.Update(Arg.Any<AvailabilitySlot>())
+            .Returns(Task.FromException<AvailabilitySlot>(new DbUpdateConcurrencyException("Conflicto de concurrencia")));
+
+        // Act
+        var act = () => _appointmentTest.Cancel(appointment.Id, patient.UserName!);
+
+        // Assert
+        await Assert.ThrowsAsync<ConflictException>(act);
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoRecibeDbUpdateConcurrencyException_Devuelve409()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new DbUpdateConcurrencyException("Conflicto de concurrencia"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
     }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(

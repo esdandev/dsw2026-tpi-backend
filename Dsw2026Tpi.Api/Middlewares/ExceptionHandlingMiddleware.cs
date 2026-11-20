@@ -29,9 +29,13 @@ public class ExceptionHandlingMiddleware
         }
         catch (Exception exception)
         {
-            if (exception is DbUpdateException dbException && IsUniqueConstraintViolation(dbException))
+            if (exception is DbUpdateConcurrencyException)
             {
-                _logger.LogWarning(exception,"Se rechazó una operación por violación de una restricción única");
+                _logger.LogWarning(exception, "Se rechazó una operación por conflicto de concurrencia");
+            }
+            else if (exception is DbUpdateException dbException && IsUniqueConstraintViolation(dbException))
+            {
+                _logger.LogWarning(exception, "Se rechazó una operación por violación de una restricción única");
             }
             else
             {
@@ -60,7 +64,8 @@ public class ExceptionHandlingMiddleware
     {
         return exception switch
         {
-            DbUpdateException dbException when IsUniqueConstraintViolation(dbException)=> HttpStatusCode.Conflict,
+            DbUpdateConcurrencyException => HttpStatusCode.Conflict,
+            DbUpdateException dbException when IsUniqueConstraintViolation(dbException) => HttpStatusCode.Conflict,
             ValidationException => HttpStatusCode.BadRequest,
             EntityNotFoundException => HttpStatusCode.NotFound,
             BusinessRuleException => HttpStatusCode.Conflict,
@@ -75,11 +80,12 @@ public class ExceptionHandlingMiddleware
     {
         if (exception is AppException appException)
             return appException.Error;
-        
+
+        if (exception is DbUpdateConcurrencyException)
+            return new ErrorResponse(nameof(ErrorCodes.APPOINTMENT_CONFLICT), ErrorCodes.APPOINTMENT_CONFLICT);
 
         if (exception is DbUpdateException dbException && IsUniqueConstraintViolation(dbException))
             return BuildUniqueConstraintError(dbException);
-        
 
         return new ErrorResponse(nameof(ErrorCodes.UNHANDLED_ERROR), ErrorCodes.UNHANDLED_ERROR);
     }

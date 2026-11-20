@@ -22,7 +22,10 @@ public class AppointmentService : IAppointmentService
         _persistence = persistence;
         _userManager = userManager;
     }
-    public async Task<AppointmentModel.CreateResponse> Create(AppointmentModel.CreateRequest request, string authenticatedUserName)
+    public Task<AppointmentModel.CreateResponse> Create(AppointmentModel.CreateRequest request, string authenticatedUserName) =>
+        _persistence.ExecuteInTransaction(() => CreateCore(request, authenticatedUserName));
+
+    private async Task<AppointmentModel.CreateResponse> CreateCore(AppointmentModel.CreateRequest request, string authenticatedUserName)
     {
         var doctor = await _persistence.GetById<Doctor>(request.DoctorId);
         if (doctor is null || doctor.Deleted)
@@ -30,7 +33,6 @@ public class AppointmentService : IAppointmentService
 
         if (!doctor.IsActive)
             throw new BusinessRuleException("DOCTOR_INACTIVE", "No se pueden reservar turnos con un médico inactivo.");
-
 
         var slot = await _persistence.GetById<AvailabilitySlot>(request.AvailabilitySlotId);
         if (slot is null || slot.DoctorId != request.DoctorId)
@@ -47,28 +49,32 @@ public class AppointmentService : IAppointmentService
         slot.Status = SlotStatus.BOOKED;
         slot.BookedCount++;
 
+        var appointment = new Appointment(slot, patient.Id, request.Reason);
+
         try
         {
             await _persistence.Update(slot);
+            await _persistence.Add(appointment);
         }
         catch (DbUpdateConcurrencyException)
         {
             throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "El turno ya fue reservado por otro paciente, elegí otro horario");
         }
 
-        var appointment = new Appointment(slot, patient.Id, request.Reason);
-        await _persistence.Add(appointment);
         return new AppointmentModel.CreateResponse(appointment.Id, appointment.Status.ToString(), slot.Start, slot.End);
     }
-    public async Task Cancel(Guid id, string authenticatedUserName)
+
+    public Task Cancel(Guid id, string authenticatedUserName) =>
+        _persistence.ExecuteInTransaction(() => CancelCore(id, authenticatedUserName));
+
+    private async Task CancelCore(Guid id, string authenticatedUserName)
     {
         var appointment = await _persistence.GetById<Appointment>(id, nameof(Appointment.AvailabilitySlot));
 
         if (appointment is null)
             throw new EntityNotFoundException("Appointment");
 
-        var patient = await _userManager.FindByNameAsync(
-            authenticatedUserName);
+        var patient = await _userManager.FindByNameAsync(authenticatedUserName);
 
         if (patient is null)
             throw new AuthenticationException();
@@ -83,15 +89,22 @@ public class AppointmentService : IAppointmentService
 
         appointment.Cancel();
 
-        if (appointment.AvailabilitySlot is not null)
+        try
         {
-            appointment.AvailabilitySlot.Status = SlotStatus.AVAILABLE;
-            appointment.AvailabilitySlot.BookedCount = Math.Max(0, appointment.AvailabilitySlot.BookedCount - 1);
+            if (appointment.AvailabilitySlot is not null)
+            {
+                appointment.AvailabilitySlot.Status = SlotStatus.AVAILABLE;
+                appointment.AvailabilitySlot.BookedCount = Math.Max(0, appointment.AvailabilitySlot.BookedCount - 1);
 
-            await _persistence.Update(appointment.AvailabilitySlot);
+                await _persistence.Update(appointment.AvailabilitySlot);
+            }
+
+            await _persistence.Update(appointment);
         }
-
-        await _persistence.Update(appointment);
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "El turno fue modificado por otra operación, intentá nuevamente");
+        }
     }
     public async Task<IEnumerable<AppointmentModel.PatientResponse>> GetByPatient(long dni, string authenticatedUserName)
     {
