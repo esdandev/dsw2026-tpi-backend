@@ -16,15 +16,17 @@ public class AuthenticationService : IAuthenticationService
     private readonly ISignInService _signInManager;
     private readonly RoleManager<IdentityRole> _roleManager;
     private readonly JwtService _jwtService;
+    private readonly ITokenRevocationService _tokenRevocationService;
     private readonly ILogger<AuthenticationService> _logger;
-    public AuthenticationService(UserManager<ApplicationUser> userManager, ISignInService signInManager, RoleManager<IdentityRole> roleManager, JwtService jwtService, ILogger<AuthenticationService> logger)
+
+    public AuthenticationService(UserManager<ApplicationUser> userManager,ISignInService signInManager,RoleManager<IdentityRole> roleManager,JwtService jwtService,ITokenRevocationService tokenRevocationService,ILogger<AuthenticationService> logger)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _roleManager = roleManager;
         _jwtService = jwtService;
+        _tokenRevocationService = tokenRevocationService;
         _logger = logger;
-
     }
     public async Task<LoginAdminModel.Response> LoginAdmin(LoginAdminModel.Request request)
     {
@@ -168,6 +170,14 @@ public class AuthenticationService : IAuthenticationService
         var token = _jwtService.GenerateToken(user.UserName!, Roles.Patient);
 
         return new LoginPatientModel.Response(token, Roles.Patient.ToUpperInvariant());
+    }
+    public async Task Logout(string jti, DateTime expiresAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(jti))
+            throw new AuthenticationException();
+
+        await _tokenRevocationService.RevokeAsync(jti, expiresAtUtc);
+        _logger.LogInformation("Token revocado mediante logout. Jti: {Jti}", jti);
     }
     private void EnsureUserIsActiveAndConfirmed(ApplicationUser user, string loginType, string email, long? dni = null)
     {

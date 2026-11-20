@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
@@ -6,6 +6,7 @@ namespace Dsw2026Tpi.Data.Identity;
 
 public class AuthenticationDbContext: IdentityDbContext
 {
+    public DbSet<RevokedToken> RevokedTokens => Set<RevokedToken>();
     public AuthenticationDbContext(DbContextOptions<AuthenticationDbContext> options)
             : base(options)
     {
@@ -31,6 +32,13 @@ public class AuthenticationDbContext: IdentityDbContext
         builder.Entity<IdentityUserLogin<string>>(b => { b.ToTable("UsersLogins"); });
         builder.Entity<IdentityRoleClaim<string>>(b => { b.ToTable("RolesClaims"); });
         builder.Entity<IdentityUserToken<string>>(b => { b.ToTable("UsersTokens"); });
+        builder.Entity<RevokedToken>(b =>
+        {
+            b.ToTable("RevokedTokens");
+            b.HasKey(token => token.Jti);
+            b.Property(token => token.Jti).HasMaxLength(64);
+            b.HasIndex(token => token.ExpiresAtUtc);
+        });
     }
 
     public override int SaveChanges()

@@ -22,6 +22,25 @@ namespace Dsw2026Tpi.Data.Migrations.Identity
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Dsw2026Tpi.Data.Identity.RevokedToken", b =>
+                {
+                    b.Property<string>("Jti")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("ExpiresAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("RevokedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Jti");
+
+                    b.HasIndex("ExpiresAtUtc");
+
+                    b.ToTable("RevokedTokens", (string)null);
+                });
+
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole", b =>
                 {
                     b.Property<string>("Id")

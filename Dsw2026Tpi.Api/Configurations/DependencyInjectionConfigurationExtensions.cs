@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.Api.Services;
+using Dsw2026Tpi.Api.Services;
 using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.Application.Services;
@@ -22,6 +22,8 @@ public static class DependencyInjectionConfigurationExtensions
         services.AddScoped<IDoctorService, DoctorService>();
         services.AddScoped<IAuthenticationService, AuthenticationService>();
         services.AddScoped<ISignInService, SignInService>();
+        services.AddScoped<ISignInService, SignInService>();
+        services.AddScoped<ITokenRevocationService, TokenRevocationService>();
         services.AddScoped<IAvailabilityService, AvailabilityService>();
         services.AddScoped<ISpecialityService, SpecialityService>();
         services.AddScoped<IAppointmentService, AppointmentService>();

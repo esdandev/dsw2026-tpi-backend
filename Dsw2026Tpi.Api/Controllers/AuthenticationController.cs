@@ -1,9 +1,12 @@
-﻿using Dsw2026Tpi.Application.Dtos;
+using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using Dsw2026Tpi.Api.Configurations;
 using Microsoft.AspNetCore.RateLimiting;
+using Dsw2026Tpi.CrossCutting.Exceptions;
+using Microsoft.AspNetCore.Authorization;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Dsw2026Tpi.Api.Controllers;
 
@@ -48,5 +51,22 @@ public class AuthenticationController : AppController
 
         var result = await _authenticationService.LoginPatient(request);
         return Ok(result);
+    }
+    [HttpPost("logout")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> Logout()
+    {
+        var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        var expClaim = User.FindFirst(JwtRegisteredClaimNames.Exp)?.Value;
+
+        if (string.IsNullOrWhiteSpace(jti) || !long.TryParse(expClaim, out var expUnixSeconds))
+            throw new AuthenticationException();
+
+        var expiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(expUnixSeconds).UtcDateTime;
+
+        await _authenticationService.Logout(jti, expiresAtUtc);
+        return NoContent();
     }
 }

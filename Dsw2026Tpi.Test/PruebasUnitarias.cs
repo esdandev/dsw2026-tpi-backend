@@ -32,6 +32,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using AuthenticationService = Dsw2026Tpi.Application.Services.AuthenticationService;
+using IAuthenticationService = Dsw2026Tpi.Application.Interfaces.IAuthenticationService;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -1493,10 +1496,155 @@ public class PruebasUnitarias
         Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
         Assert.Equal(0, root.GetProperty("details").GetArrayLength());
     }
+    [Fact]
+    public void JwtService_GenerateToken_IncluyeClaimJtiUnicoPorToken()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "ClaveSuperSecretaDePruebaConAlMenos32Caracteres!",
+                ["Jwt:Issuer"] = "Dsw2026Tpi",
+                ["Jwt:Audience"] = "Dsw2026TpiUsers",
+                ["Jwt:ExpiresInMinutes"] = "60"
+            })
+            .Build();
+
+        var jwtService = new JwtService(configuration);
+        var handler = new JwtSecurityTokenHandler();
+
+        var token1 = handler.ReadJwtToken(jwtService.GenerateToken("admin@utn.com", Roles.Administrator));
+        var token2 = handler.ReadJwtToken(jwtService.GenerateToken("admin@utn.com", Roles.Administrator));
+
+        var jti1 = token1.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
+        var jti2 = token2.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
+
+        Assert.False(string.IsNullOrWhiteSpace(jti1));
+        Assert.False(string.IsNullOrWhiteSpace(jti2));
+        Assert.True(Guid.TryParse(jti1, out _));
+        Assert.NotEqual(jti1, jti2);
+    }
+
+    [Fact]
+    public async Task AuthenticationService_Logout_CuandoJtiEsValido_RevocaElToken()
+    {
+        var (service, _, _, revocationService, _) = CrearAuthenticationServiceCompleto();
+        var expiresAt = DateTime.UtcNow.AddHours(1);
+
+        await service.Logout("jti-valido-123", expiresAt);
+
+        await revocationService.Received(1).RevokeAsync("jti-valido-123", expiresAt, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AuthenticationService_Logout_CuandoJtiEstaVacio_LanzaAuthenticationException()
+    {
+        var (service, _, _, revocationService, _) = CrearAuthenticationServiceCompleto();
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => service.Logout("   ", DateTime.UtcNow.AddHours(1)));
+
+        await revocationService.DidNotReceive().RevokeAsync(Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AuthenticationController_Logout_ConClaimsValidos_RevocaTokenYDevuelve204()
+    {
+        var authService = Substitute.For<IAuthenticationService>();
+        var expUnix = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+        var expectedExpiresAt = DateTimeOffset.FromUnixTimeSeconds(expUnix).UtcDateTime;
+
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(JwtRegisteredClaimNames.Jti, "jti-abc-123"),
+                    new Claim(JwtRegisteredClaimNames.Exp, expUnix.ToString())
+                ], "TestAuth"))
+        };
+
+        var controller = new AuthenticationController(
+            authService,
+            new LoginAdminValidator(),
+            new LoginPatientValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        var result = await controller.Logout();
+
+        Assert.IsType<NoContentResult>(result);
+        await authService.Received(1).Logout("jti-abc-123", expectedExpiresAt);
+    }
+
+    [Fact]
+    public async Task AuthenticationController_Logout_SinJti_LanzaAuthenticationException()
+    {
+        var authService = Substitute.For<IAuthenticationService>();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([], "TestAuth"))
+        };
+
+        var controller = new AuthenticationController(
+            authService,
+            new LoginAdminValidator(),
+            new LoginPatientValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => controller.Logout());
+
+        await authService.DidNotReceive().Logout(Arg.Any<string>(), Arg.Any<DateTime>());
+    }
+
+    [Theory]
+    [InlineData("jti-revocado", true, true)]
+    [InlineData("jti-valido", false, false)]
+    [InlineData("", false, true)]
+    public async Task JwtBearerOnTokenValidated_RechazaTokensRevocadosOSinJti(string jti, bool estaRevocado, bool debeFallar)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "ClaveSuperSecretaDePruebaConAlMenos32Caracteres!",
+                ["Jwt:Issuer"] = "Dsw2026Tpi",
+                ["Jwt:Audience"] = "Dsw2026TpiUsers"
+            })
+            .Build();
+
+        var revocationService = Substitute.For<ITokenRevocationService>();
+        revocationService.IsRevokedAsync(jti, Arg.Any<CancellationToken>()).Returns(estaRevocado);
+
+        var services = new ServiceCollection();
+        services.AddAppAuthentication(configuration);
+        services.AddScoped(_ => revocationService);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+
+        var claims = string.IsNullOrEmpty(jti)
+            ? Array.Empty<Claim>()
+            : [new Claim(JwtRegisteredClaimNames.Jti, jti)];
+
+        var httpContext = new DefaultHttpContext { RequestServices = provider };
+        var scheme = new AuthenticationScheme(JwtBearerDefaults.AuthenticationScheme, null, typeof(JwtBearerHandler));
+        var context = new TokenValidatedContext(httpContext, scheme, options)
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(claims, JwtBearerDefaults.AuthenticationScheme))
+        };
+
+        await options.Events.OnTokenValidated(context);
+
+        if (debeFallar)
+            Assert.NotNull(context.Result?.Failure);
+        else
+            Assert.Null(context.Result?.Failure);
+    }
     private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
         CrearAuthenticationService()
     {
-        var (service, userManager, _, logger) = CrearAuthenticationServiceConSignIn();
+        var (service, userManager, _, _, logger) = CrearAuthenticationServiceCompleto();
         return (service, userManager, logger);
     }
     [Fact]
@@ -1666,17 +1814,23 @@ public class PruebasUnitarias
     private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, ISignInService SignInService, TestLogger<AuthenticationService> Logger)
         CrearAuthenticationServiceConSignIn()
     {
+        var (service, userManager, signInService, _, logger) = CrearAuthenticationServiceCompleto();
+        return (service, userManager, signInService, logger);
+    }
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, ISignInService SignInService, ITokenRevocationService TokenRevocationService, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationServiceCompleto()
+    {
         var userManager = Substitute.For<UserManager<ApplicationUser>>(
             Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         var signInService = Substitute.For<ISignInService>();
         var roleManager = Substitute.For<RoleManager<IdentityRole>>(
             Substitute.For<IRoleStore<IdentityRole>>(), null, null, null, null);
+        var tokenRevocationService = Substitute.For<ITokenRevocationService>();
         var logger = new TestLogger<AuthenticationService>();
 
-        var service = new AuthenticationService(userManager, signInService, roleManager, null!, logger);
-        return (service, userManager, signInService, logger);
+        var service = new AuthenticationService(userManager, signInService, roleManager, null!, tokenRevocationService, logger);
+        return (service, userManager, signInService, tokenRevocationService, logger);
     }
-
     private sealed class TestLogger<T> : ILogger<T>
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = [];
