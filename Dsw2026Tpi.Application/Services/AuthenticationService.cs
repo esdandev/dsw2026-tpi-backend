@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.Application.Dtos;
+using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.CrossCutting.Exceptions;
 using Dsw2026Tpi.CrossCutting.Identity;
@@ -16,24 +16,49 @@ public class AuthenticationService : IAuthenticationService
     private readonly ISignInService _signInManager;
     private readonly RoleManager<IdentityRole> _roleManager;
     private readonly JwtService _jwtService;
+    private readonly ITokenRevocationService _tokenRevocationService;
     private readonly ILogger<AuthenticationService> _logger;
-    public AuthenticationService(UserManager<ApplicationUser> userManager, ISignInService signInManager, RoleManager<IdentityRole> roleManager, JwtService jwtService, ILogger<AuthenticationService> logger)
+
+    public AuthenticationService(UserManager<ApplicationUser> userManager,ISignInService signInManager,RoleManager<IdentityRole> roleManager,JwtService jwtService,ITokenRevocationService tokenRevocationService,ILogger<AuthenticationService> logger)
     {
         _userManager = userManager;
         _signInManager = signInManager;
         _roleManager = roleManager;
         _jwtService = jwtService;
+        _tokenRevocationService = tokenRevocationService;
         _logger = logger;
-
     }
     public async Task<LoginAdminModel.Response> LoginAdmin(LoginAdminModel.Request request)
     {
-        var user = await _userManager.FindByEmailAsync(request.Email) ?? throw new AuthenticationException();
+        var user = await _userManager.FindByEmailAsync(request.Email);
+
+        if (user is null)
+        {
+            _logger.LogWarning("Intento de login administrativo con usuario inexistente. Email: {Email}", request.Email);
+            throw new AuthenticationException();
+        }
+
+        EnsureUserIsActiveAndConfirmed(user, "administrador", request.Email);
+
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            _logger.LogWarning("Intento de login administrativo sobre cuenta bloqueada. Email: {Email}", request.Email);
+            throw new AuthenticationException();
+        }
+
         var passwordIsValid = await _signInManager.CheckPassword(user, request.Password);
 
         if (!passwordIsValid)
         {
-            _logger.LogError("Intento de login administrativo fallido para: {Email}", request.Email);
+            if (await _userManager.IsLockedOutAsync(user))
+            {
+                _logger.LogWarning("Cuenta de administrador bloqueada por intentos fallidos. Email: {Email}", request.Email);
+            }
+            else
+            {
+                _logger.LogWarning("Intento de login administrativo fallido por contraseña incorrecta. Email: {Email}", request.Email);
+            }
+
             throw new AuthenticationException();
         }
 
@@ -41,12 +66,12 @@ public class AuthenticationService : IAuthenticationService
 
         if (!isAdministrator)
         {
-            _logger.LogWarning("Intento de login administrativo de un usuario sin rol Administrador: {Email}", request.Email);
+            _logger.LogWarning("Intento de login administrativo de un usuario sin rol Administrador. Email: {Email}", request.Email);
             throw new AuthenticationException();
         }
 
         var token = _jwtService.GenerateToken(user.UserName!, Roles.Administrator);
-      return new LoginAdminModel.Response(token, Roles.Administrator.ToUpperInvariant());
+        return new LoginAdminModel.Response(token, Roles.Administrator.ToUpperInvariant());
     }
     public async Task<LoginPatientModel.Response> LoginPatient(LoginPatientModel.Request request)
     {
@@ -107,23 +132,7 @@ public class AuthenticationService : IAuthenticationService
         }
         else
         {
-            if (user.Deleted)
-            {
-                _logger.LogWarning(
-                    "Intento de login de paciente con usuario eliminado. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
-                    MaskDni(request.Dni));
-                throw new AuthenticationException();
-            }
-
-            if (!user.EmailConfirmed)
-            {
-                _logger.LogWarning(
-                    "Intento de login de paciente con correo no confirmado. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
-                    MaskDni(request.Dni));
-                throw new AuthenticationException();
-            }
+            EnsureUserIsActiveAndConfirmed(user, "paciente", request.Email, request.Dni);
 
             if (user.Dni != request.Dni)
             {
@@ -162,7 +171,58 @@ public class AuthenticationService : IAuthenticationService
 
         return new LoginPatientModel.Response(token, Roles.Patient.ToUpperInvariant());
     }
+    public async Task Logout(string jti, DateTime expiresAtUtc)
+    {
+        if (string.IsNullOrWhiteSpace(jti))
+            throw new AuthenticationException();
 
+        await _tokenRevocationService.RevokeAsync(jti, expiresAtUtc);
+        _logger.LogInformation("Token revocado mediante logout. Jti: {Jti}", jti);
+    }
+    private void EnsureUserIsActiveAndConfirmed(ApplicationUser user, string loginType, string email, long? dni = null)
+    {
+        if (user.Deleted)
+        {
+            if (dni.HasValue)
+            {
+                _logger.LogWarning(
+                    "Intento de login de {LoginType} con usuario eliminado. Email: {Email}, Dni: {MaskedDni}",
+                    loginType,
+                    email,
+                    MaskDni(dni.Value));
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Intento de login de {LoginType} con usuario eliminado. Email: {Email}",
+                    loginType,
+                    email);
+            }
+
+            throw new AuthenticationException();
+        }
+
+        if (!user.EmailConfirmed)
+        {
+            if (dni.HasValue)
+            {
+                _logger.LogWarning(
+                    "Intento de login de {LoginType} con correo no confirmado. Email: {Email}, Dni: {MaskedDni}",
+                    loginType,
+                    email,
+                    MaskDni(dni.Value));
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Intento de login de {LoginType} con correo no confirmado. Email: {Email}",
+                    loginType,
+                    email);
+            }
+
+            throw new AuthenticationException();
+        }
+    }
     private static string MaskDni(long dni)
     {
         var digits = dni.ToString();

@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.CrossCutting.Identity;
+using Dsw2026Tpi.CrossCutting.Identity;
 using Dsw2026Tpi.CrossCutting.Models;
 using Dsw2026Tpi.CrossCutting.Resources;
 using Dsw2026Tpi.Data.Identity;
@@ -8,6 +8,8 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using System.Text.Json;
+using Dsw2026Tpi.Application.Interfaces;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Dsw2026Tpi.Api.Configurations;
 
@@ -53,6 +55,23 @@ public static class SecurityConfigurationExtensions
 
                 options.Events = new JwtBearerEvents
                 {
+                    OnTokenValidated = async context =>
+                    {
+                        var jti = context.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+                        if (string.IsNullOrWhiteSpace(jti))
+                        {
+                            context.Fail("Token sin identificador jti.");
+                            return;
+                        }
+
+                        var revocationService = context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+
+                        if (await revocationService.IsRevokedAsync(jti, context.HttpContext.RequestAborted))
+                        {
+                            context.Fail("El token fue revocado.");
+                        }
+                    },
                     OnChallenge = async context =>
                     {
                         context.HandleResponse();
@@ -121,6 +140,13 @@ public static class SecurityConfigurationExtensions
                 RequireLowercase = true,
                 RequireUppercase = true,
                 RequireDigit = true
+            };
+
+            options.Lockout = new LockoutOptions
+            {
+                AllowedForNewUsers = true,
+                MaxFailedAccessAttempts = 5,
+                DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15)
             };
 
         }).AddRoles<IdentityRole>()

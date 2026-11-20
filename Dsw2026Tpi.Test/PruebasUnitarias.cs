@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.Api.Configurations;
+using Dsw2026Tpi.Api.Configurations;
 using Dsw2026Tpi.Api.Controllers;
 using Dsw2026Tpi.Api.Middlewares;
 using Dsw2026Tpi.Application.Dtos;
@@ -27,6 +27,14 @@ using Xunit;
 using Dsw2026Tpi.CrossCutting.Identity;
 using System.Text.Json;
 using Dsw2026Tpi.CrossCutting.Resources;
+using Dsw2026Tpi.Api.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using AuthenticationService = Dsw2026Tpi.Application.Services.AuthenticationService;
+using IAuthenticationService = Dsw2026Tpi.Application.Interfaces.IAuthenticationService;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.IdentityModel.Tokens.Jwt;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -1488,20 +1496,341 @@ public class PruebasUnitarias
         Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
         Assert.Equal(0, root.GetProperty("details").GetArrayLength());
     }
+    [Fact]
+    public void JwtService_GenerateToken_IncluyeClaimJtiUnicoPorToken()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "ClaveSuperSecretaDePruebaConAlMenos32Caracteres!",
+                ["Jwt:Issuer"] = "Dsw2026Tpi",
+                ["Jwt:Audience"] = "Dsw2026TpiUsers",
+                ["Jwt:ExpiresInMinutes"] = "60"
+            })
+            .Build();
+
+        var jwtService = new JwtService(configuration);
+        var handler = new JwtSecurityTokenHandler();
+
+        var token1 = handler.ReadJwtToken(jwtService.GenerateToken("admin@utn.com", Roles.Administrator));
+        var token2 = handler.ReadJwtToken(jwtService.GenerateToken("admin@utn.com", Roles.Administrator));
+
+        var jti1 = token1.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
+        var jti2 = token2.Claims.FirstOrDefault(c => c.Type == JwtRegisteredClaimNames.Jti)?.Value;
+
+        Assert.False(string.IsNullOrWhiteSpace(jti1));
+        Assert.False(string.IsNullOrWhiteSpace(jti2));
+        Assert.True(Guid.TryParse(jti1, out _));
+        Assert.NotEqual(jti1, jti2);
+    }
+
+    [Fact]
+    public async Task AuthenticationService_Logout_CuandoJtiEsValido_RevocaElToken()
+    {
+        var (service, _, _, revocationService, _) = CrearAuthenticationServiceCompleto();
+        var expiresAt = DateTime.UtcNow.AddHours(1);
+
+        await service.Logout("jti-valido-123", expiresAt);
+
+        await revocationService.Received(1).RevokeAsync("jti-valido-123", expiresAt, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AuthenticationService_Logout_CuandoJtiEstaVacio_LanzaAuthenticationException()
+    {
+        var (service, _, _, revocationService, _) = CrearAuthenticationServiceCompleto();
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => service.Logout("   ", DateTime.UtcNow.AddHours(1)));
+
+        await revocationService.DidNotReceive().RevokeAsync(Arg.Any<string>(), Arg.Any<DateTime>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task AuthenticationController_Logout_ConClaimsValidos_RevocaTokenYDevuelve204()
+    {
+        var authService = Substitute.For<IAuthenticationService>();
+        var expUnix = DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeSeconds();
+        var expectedExpiresAt = DateTimeOffset.FromUnixTimeSeconds(expUnix).UtcDateTime;
+
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim(JwtRegisteredClaimNames.Jti, "jti-abc-123"),
+                    new Claim(JwtRegisteredClaimNames.Exp, expUnix.ToString())
+                ], "TestAuth"))
+        };
+
+        var controller = new AuthenticationController(
+            authService,
+            new LoginAdminValidator(),
+            new LoginPatientValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        var result = await controller.Logout();
+
+        Assert.IsType<NoContentResult>(result);
+        await authService.Received(1).Logout("jti-abc-123", expectedExpiresAt);
+    }
+
+    [Fact]
+    public async Task AuthenticationController_Logout_SinJti_LanzaAuthenticationException()
+    {
+        var authService = Substitute.For<IAuthenticationService>();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity([], "TestAuth"))
+        };
+
+        var controller = new AuthenticationController(
+            authService,
+            new LoginAdminValidator(),
+            new LoginPatientValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => controller.Logout());
+
+        await authService.DidNotReceive().Logout(Arg.Any<string>(), Arg.Any<DateTime>());
+    }
+
+    [Theory]
+    [InlineData("jti-revocado", true, true)]
+    [InlineData("jti-valido", false, false)]
+    [InlineData("", false, true)]
+    public async Task JwtBearerOnTokenValidated_RechazaTokensRevocadosOSinJti(string jti, bool estaRevocado, bool debeFallar)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "ClaveSuperSecretaDePruebaConAlMenos32Caracteres!",
+                ["Jwt:Issuer"] = "Dsw2026Tpi",
+                ["Jwt:Audience"] = "Dsw2026TpiUsers"
+            })
+            .Build();
+
+        var revocationService = Substitute.For<ITokenRevocationService>();
+        revocationService.IsRevokedAsync(jti, Arg.Any<CancellationToken>()).Returns(estaRevocado);
+
+        var services = new ServiceCollection();
+        services.AddAppAuthentication(configuration);
+        services.AddScoped(_ => revocationService);
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptionsMonitor<JwtBearerOptions>>()
+            .Get(JwtBearerDefaults.AuthenticationScheme);
+
+        var claims = string.IsNullOrEmpty(jti)
+            ? Array.Empty<Claim>()
+            : [new Claim(JwtRegisteredClaimNames.Jti, jti)];
+
+        var httpContext = new DefaultHttpContext { RequestServices = provider };
+        var scheme = new AuthenticationScheme(JwtBearerDefaults.AuthenticationScheme, null, typeof(JwtBearerHandler));
+        var context = new TokenValidatedContext(httpContext, scheme, options)
+        {
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(claims, JwtBearerDefaults.AuthenticationScheme))
+        };
+
+        await options.Events.OnTokenValidated(context);
+
+        if (debeFallar)
+            Assert.NotNull(context.Result?.Failure);
+        else
+            Assert.Null(context.Result?.Failure);
+    }
     private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
         CrearAuthenticationService()
+    {
+        var (service, userManager, _, _, logger) = CrearAuthenticationServiceCompleto();
+        return (service, userManager, logger);
+    }
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioNoExiste_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        userManager.FindByEmailAsync("admin@utn.com").Returns((ApplicationUser?)null);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("Admin123!", log.Message);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioEstaEliminado_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = true
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoEmailNoEstaConfirmado_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = false,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoCuentaEstaBloqueada_LanzaAuthenticationExceptionYLogueaWarningSinValidarPassword()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(true);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoPasswordEsIncorrecta_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(false);
+        signInService.CheckPassword(user, "Incorrecta1").Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Incorrecta1")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("Incorrecta1", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioNoTieneRolAdministrador_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@utn.com",
+            Email = "paciente@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(false);
+        signInService.CheckPassword(user, "Admin123!").Returns(true);
+        userManager.IsInRoleAsync(user, Roles.Administrator).Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("paciente@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+    }
+
+    [Fact]
+    public async Task SignInService_CheckPassword_HabilitaLockoutEnFallos()
+    {
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        var signInManager = Substitute.For<SignInManager<ApplicationUser>>(
+            userManager,
+            Substitute.For<IHttpContextAccessor>(),
+            Substitute.For<IUserClaimsPrincipalFactory<ApplicationUser>>(),
+            Options.Create(new IdentityOptions()),
+            Substitute.For<ILogger<SignInManager<ApplicationUser>>>(),
+            Substitute.For<IAuthenticationSchemeProvider>(),
+            Substitute.For<IUserConfirmation<ApplicationUser>>());
+
+        var user = new ApplicationUser { UserName = "admin@utn.com", Email = "admin@utn.com" };
+        signInManager.CheckPasswordSignInAsync(user, "Admin123!", true)
+            .Returns(Microsoft.AspNetCore.Identity.SignInResult.Success);
+
+        var service = new SignInService(signInManager);
+        var result = await service.CheckPassword(user, "Admin123!");
+
+        Assert.True(result);
+        await signInManager.Received(1).CheckPasswordSignInAsync(user, "Admin123!", true);
+    }
+
+    [Fact]
+    public void AddAppIdentity_ConfiguraLockoutHabilitado()
+    {
+        var services = new ServiceCollection();
+        services.AddAppIdentity();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<IdentityOptions>>().Value;
+
+        Assert.True(options.Lockout.AllowedForNewUsers);
+        Assert.Equal(5, options.Lockout.MaxFailedAccessAttempts);
+        Assert.Equal(TimeSpan.FromMinutes(15), options.Lockout.DefaultLockoutTimeSpan);
+    }
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, ISignInService SignInService, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationServiceConSignIn()
+    {
+        var (service, userManager, signInService, _, logger) = CrearAuthenticationServiceCompleto();
+        return (service, userManager, signInService, logger);
+    }
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, ISignInService SignInService, ITokenRevocationService TokenRevocationService, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationServiceCompleto()
     {
         var userManager = Substitute.For<UserManager<ApplicationUser>>(
             Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         var signInService = Substitute.For<ISignInService>();
         var roleManager = Substitute.For<RoleManager<IdentityRole>>(
             Substitute.For<IRoleStore<IdentityRole>>(), null, null, null, null);
+        var tokenRevocationService = Substitute.For<ITokenRevocationService>();
         var logger = new TestLogger<AuthenticationService>();
 
-        var service = new AuthenticationService(userManager, signInService, roleManager, null!, logger);
-        return (service, userManager, logger);
+        var service = new AuthenticationService(userManager, signInService, roleManager, null!, tokenRevocationService, logger);
+        return (service, userManager, signInService, tokenRevocationService, logger);
     }
-
     private sealed class TestLogger<T> : ILogger<T>
     {
         public List<(LogLevel Level, string Message)> Entries { get; } = [];
