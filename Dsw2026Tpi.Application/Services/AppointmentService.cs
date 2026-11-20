@@ -138,7 +138,8 @@ public class AppointmentService : IAppointmentService
             var specialty = doctor.Speciality!;
 
             return new AppointmentModel.AdministrativeResponse(appointment.Id, appointment.Status.ToString(),
-                   patients[appointment.PatientUserId],
+                   patients.GetValueOrDefault(appointment.PatientUserId)
+                       ?? new AppointmentModel.AdministrativePatient(0, "Paciente desconocido"),
                    new AppointmentModel.AdministrativeDoctor(doctor.Id, doctor.Name,
                    new AppointmentModel.AdministrativeSpecialty(specialty.Id, specialty.Name)), slot.Start);
         });
@@ -179,7 +180,8 @@ public class AppointmentService : IAppointmentService
             var specialty = doctor.Speciality!;
 
             return new AppointmentModel.SearchAdministrativeResponse(appointment.Id, appointment.Status.ToString(),
-                patients[appointment.PatientUserId],
+                patients.GetValueOrDefault(appointment.PatientUserId)
+                    ?? new AppointmentModel.AdministrativePatient(0, "Paciente desconocido"),
                 new AppointmentModel.AdministrativeDoctor(doctor.Id, doctor.Name,
                 new AppointmentModel.AdministrativeSpecialty(specialty.Id, specialty.Name)), slot.Start);
         });

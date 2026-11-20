@@ -1,5 +1,7 @@
-﻿using System.Linq.Expressions;
+﻿using Dsw2026Tpi.Api.Controllers;
+using Dsw2026Tpi.Api.Middlewares;
 using Dsw2026Tpi.Application.Dtos;
+using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.Application.Services;
 using Dsw2026Tpi.Application.Validators;
 using Dsw2026Tpi.CrossCutting.Exceptions;
@@ -7,16 +9,18 @@ using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Data.Identity;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
-using Microsoft.AspNetCore.Identity;
-using NSubstitute;
-using Xunit;
-using System.Security.Claims;
-using Dsw2026Tpi.Api.Controllers;
-using Dsw2026Tpi.Api.Middlewares;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
+using NSubstitute;
+using System.Linq.Expressions;
+using System.Security.Claims;
+using Xunit;
+using Dsw2026Tpi.Application.Interfaces;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -813,4 +817,125 @@ public class PruebasUnitarias
 
     private static Doctor CrearDoctor() =>
         new("Dra. Ana López", "MP1234", new Speciality("Clínica", "Clínica médica"));
+    [Fact]
+    public async Task AppointmentGetByDate_CuandoHayTurnoHuerfanoSinPaciente_NoLanzaKeyNotFoundException()
+    {
+        // Arrange
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", speciality);
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.FromArgentina(new DateTime(2026, 11, 20, 10, 0, 0)),
+            End = Clock.FromArgentina(new DateTime(2026, 11, 20, 10, 30, 0)),
+            Status = SlotStatus.BOOKED
+        };
+        var appointment = new Appointment(slot, "usuario-inexistente", "Control de rutina");
+
+        _persistence.Paginate<Appointment, DateTime>(
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<Expression<Func<Appointment, bool>>>(),
+                Arg.Any<Expression<Func<Appointment, DateTime>>>(),
+                Arg.Any<string[]>())
+            .Returns(new Pagination<Appointment>(10, 0, 1, [appointment]));
+
+        _userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>(Array.Empty<ApplicationUser>()));
+
+        // Act
+        var result = await _appointmentTest.GetByDate(new DateOnly(2026, 11, 20), 10, 0);
+
+        // Assert
+        var item = Assert.Single(result.Data);
+        Assert.Equal(0, item.Patient.Dni);
+        Assert.Equal("Paciente desconocido", item.Patient.FullName);
+    }
+
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("abcd", false)]
+    [InlineData("abcde", true)]
+    [InlineData(300, true)]
+    [InlineData(301, false)]
+    public void AppointmentCreateRequestValidator_ValidaLongitudDeReason(object input, bool valido)
+    {
+        var reason = input is int length ? new string('a', length) : (string)input;
+        var validator = new AppointmentCreateRequestValidator();
+        var request = new AppointmentModel.CreateRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new AppointmentModel.PatientRequest(40123456),
+            reason);
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
+
+    [Fact]
+    public async Task AvailabilityController_Create_Devuelve201SinHeaderLocation()
+    {
+        var service = Substitute.For<IAvailabilityService>();
+        var doctorId = Guid.NewGuid();
+        service.Create(Arg.Any<AvailabilityModel.Request>())
+            .Returns([new AvailabilityModel.Response { Id = Guid.NewGuid(), DoctorId = doctorId }]);
+
+        var controller = new AvailabilityController(service, new AvailabilityRequestValidator());
+        var request = new AvailabilityModel.Request
+        {
+            DoctorId = doctorId.ToString(),
+            Days = [new AvailabilityModel.DayRequest { Day = "LUNES", StartTime = "09:00", EndTime = "12:00" }]
+        };
+
+        var result = await controller.Create(request);
+
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status201Created, objectResult.StatusCode);
+    }
+
+    private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
+    {
+        public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable) { }
+        public TestAsyncEnumerable(Expression expression) : base(expression) { }
+
+        IQueryProvider IQueryable.Provider => new TestAsyncQueryProvider<T>(this);
+
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new TestAsyncEnumerator<T>(this.AsEnumerable().GetEnumerator());
+    }
+
+    private sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IAsyncQueryProvider
+    {
+        public IQueryable CreateQuery(Expression expression) => new TestAsyncEnumerable<TEntity>(expression);
+        public IQueryable<TElement> CreateQuery<TElement>(Expression expression) => new TestAsyncEnumerable<TElement>(expression);
+        public object? Execute(Expression expression) => inner.Execute(expression);
+        public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+
+        public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
+        {
+            var expectedResultType = typeof(TResult).GetGenericArguments()[0];
+            var executionResult = typeof(IQueryProvider)
+                .GetMethod(nameof(IQueryProvider.Execute), 1, [typeof(Expression)])!
+                .MakeGenericMethod(expectedResultType)
+                .Invoke(inner, [expression]);
+
+            return (TResult)typeof(Task)
+                .GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(expectedResultType)
+                .Invoke(null, [executionResult])!;
+        }
+    }
+
+    private sealed class TestAsyncEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T>
+    {
+        public T Current => inner.Current;
+        public ValueTask<bool> MoveNextAsync() => new(inner.MoveNext());
+        public ValueTask DisposeAsync()
+        {
+            inner.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 }

@@ -31,6 +31,8 @@ public class AppointmentCreateRequestValidator : AbstractValidator<AppointmentMo
             .NotEmpty()
             .WithMessage("es obligatorio")
             .MinimumLength(5)
-            .WithMessage("debe tener al menos 5 caracteres");
+            .WithMessage("debe tener al menos 5 caracteres")
+            .MaximumLength(300)
+            .WithMessage("no puede superar los 300 caracteres");
     }
 }

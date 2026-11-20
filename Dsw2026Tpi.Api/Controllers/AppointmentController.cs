@@ -96,7 +96,7 @@ public class AppointmentController : AppController
         Invalidez(validation);
 
         var appointment = await _service.Create(request, authenticatedUserName);
-        return Created($"/api/appointments/{appointment.Id}", appointment);
+        return StatusCode(StatusCodes.Status201Created, appointment);
     }
 
     [HttpDelete("{id}")]

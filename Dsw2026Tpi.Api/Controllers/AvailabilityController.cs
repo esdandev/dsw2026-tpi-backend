@@ -31,7 +31,7 @@ public class AvailabilityController : AppController
         Invalidez(validation);
 
         var result = await _service.Create(request);
-        return Created($"/api/availabilities/{result.First().Id}", result);
+        return StatusCode(StatusCodes.Status201Created, result);
     }
 
     [HttpPut]
