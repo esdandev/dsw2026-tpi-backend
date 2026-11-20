@@ -8,6 +8,7 @@ using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Linq.Expressions;
 
 namespace Dsw2026Tpi.Application.Services;
@@ -16,11 +17,13 @@ public class AppointmentService : IAppointmentService
 {
     private readonly IPersistence _persistence;
     private readonly UserManager<ApplicationUser> _userManager;
+    private readonly ILogger<AppointmentService> _logger;
 
-    public AppointmentService(IPersistence persistence, UserManager<ApplicationUser> userManager)
+    public AppointmentService(IPersistence persistence, UserManager<ApplicationUser> userManager, ILogger<AppointmentService> logger)
     {
         _persistence = persistence;
         _userManager = userManager;
+        _logger = logger;
     }
     public Task<AppointmentModel.CreateResponse> Create(AppointmentModel.CreateRequest request, string authenticatedUserName) =>
         _persistence.ExecuteInTransaction(() => CreateCore(request, authenticatedUserName));
@@ -60,6 +63,9 @@ public class AppointmentService : IAppointmentService
         {
             throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "El turno ya fue reservado por otro paciente, elegí otro horario");
         }
+
+        _logger.LogInformation("Turno reservado. AppointmentId: {AppointmentId}; DoctorId: {DoctorId}; SlotId: {SlotId}; InicioUtc: {Start:O}",
+            appointment.Id, doctor.Id, slot.Id, slot.Start);
 
         return new AppointmentModel.CreateResponse(appointment.Id, appointment.Status.ToString(), slot.Start, slot.End);
     }
@@ -110,6 +116,9 @@ public class AppointmentService : IAppointmentService
         {
             throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "El turno fue modificado por otra operación, intentá nuevamente");
         }
+
+        _logger.LogInformation("Turno cancelado. AppointmentId: {AppointmentId}; DoctorId: {DoctorId}; InicioUtc: {Start:O}",
+            appointment.Id, appointment.AvailabilitySlot?.DoctorId, appointment.AvailabilitySlot?.Start);
     }
     public async Task<IEnumerable<AppointmentModel.PatientResponse>> GetByPatient(long dni, string authenticatedUserName)
     {

@@ -6,6 +6,7 @@ using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using Dsw2026Tpi.CrossCutting.Resources;
+using Microsoft.Extensions.Logging;
 
 namespace Dsw2026Tpi.Application.Services;
 
@@ -13,11 +14,13 @@ public class AvailabilityService : IAvailabilityService
 {
     private readonly IPersistence _persistence;
     private readonly IHolidayProvider _holidayProvider;
+    private readonly ILogger<AvailabilityService> _logger;
 
-    public AvailabilityService(IPersistence persistence, IHolidayProvider holidayProvider)
+    public AvailabilityService(IPersistence persistence, IHolidayProvider holidayProvider, ILogger<AvailabilityService> logger)
     {
         _persistence = persistence;
         _holidayProvider = holidayProvider;
+        _logger = logger;
     }
 
     private static readonly string[] ValidDayNames =
@@ -218,6 +221,9 @@ public class AvailabilityService : IAvailabilityService
         if (slotsToAdd.Count > 0)
             await _persistence.AddRange(slotsToAdd);
 
+        _logger.LogInformation("Disponibilidad creada. DoctorId: {DoctorId}; Reglas: {Rules}; Turnos generados: {Slots}",
+            doctorId, createdRules.Count, slotsToAdd.Count);
+
         return createdRules.Select(r => new AvailabilityModel.Response
         {
             Id = r.Id,
@@ -410,6 +416,9 @@ public class AvailabilityService : IAvailabilityService
 
             await _persistence.Update(existingRule);
         }
+
+        _logger.LogInformation("Disponibilidad actualizada. DoctorId: {DoctorId}; Reglas: {Rules}; Turnos nuevos: {NewSlots}",
+            doctorId, createdRules.Count, newSlots.Count);
 
         return createdRules.Select(rule => new AvailabilityModel.Response
         {
