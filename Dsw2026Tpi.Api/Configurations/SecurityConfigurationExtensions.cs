@@ -102,8 +102,8 @@ public static class SecurityConfigurationExtensions
             options.AddDefaultPolicy(policy =>
             {
                 policy.WithOrigins(allowedOrigins)
-                     .AllowAnyHeader()
-                     .AllowAnyMethod()
+                     .WithMethods("GET", "POST", "PUT", "DELETE")
+                     .WithHeaders("Authorization", "Content-Type")
                      .AllowCredentials();
             });
         });
