@@ -18,6 +18,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
 using System.Net;
@@ -53,7 +54,7 @@ public class PruebasUnitarias
             .Returns(call => call.Arg<Func<Task>>()());
 
         _userManager = Substitute.For<UserManager<ApplicationUser>>(Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
-        _appointmentTest = new AppointmentService(_persistence, _userManager); //Objeto de prueba
+        _appointmentTest = new AppointmentService(_persistence, _userManager, NullLogger<AppointmentService>.Instance); //Objeto de prueba
     }
 
     [Fact]
@@ -192,6 +193,47 @@ public class PruebasUnitarias
         // Assert
         Assert.Equal("BOOKED", result.Status);
         Assert.Equal(SlotStatus.BOOKED, slot.Status);
+    }
+
+    [Fact]
+    public async Task AppointmentCreate_RegistraElTurnoEnElLogSinDatosPersonales()
+    {
+        var request = new AppointmentModel.CreateRequest(
+            DoctorId: Guid.NewGuid(),
+            AvailabilitySlotId: Guid.NewGuid(),
+            Patient: new(40123456),
+            Reason: "Control de rutina");
+
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", speciality, request.DoctorId);
+        var slot = new AvailabilitySlot
+        {
+            Id = request.AvailabilitySlotId,
+            DoctorId = request.DoctorId,
+            Start = DateTime.UtcNow.AddDays(1),
+            End = DateTime.UtcNow.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.AVAILABLE
+        };
+        var patient = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456
+        };
+
+        _persistence.GetById<Doctor>(request.DoctorId).Returns(doctor);
+        _persistence.GetById<AvailabilitySlot>(request.AvailabilitySlotId).Returns(slot);
+        _userManager.FindByNameAsync("paciente@email.com").Returns(patient);
+
+        var logger = new CapturingLogger<AppointmentService>();
+        var service = new AppointmentService(_persistence, _userManager, logger);
+
+        await service.Create(request, "paciente@email.com");
+
+        var entry = Assert.Single(logger.Messages);
+        Assert.Contains("Turno reservado", entry);
+        Assert.DoesNotContain("paciente@email.com", entry);
+        Assert.DoesNotContain("40123456", entry);
     }
 
     [Fact]
@@ -710,7 +752,7 @@ public class PruebasUnitarias
         userManager.FindByNameAsync(paciente1.UserName!).Returns(paciente1);
         userManager.FindByNameAsync(paciente2.UserName!).Returns(paciente2);
 
-        var service = new AppointmentService(persistence, userManager);
+        var service = new AppointmentService(persistence, userManager, NullLogger<AppointmentService>.Instance);
         var middlewareLogger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
 
         async Task<int> EjecutarReservaHttp(ApplicationUser paciente)
@@ -1066,7 +1108,7 @@ public class PruebasUnitarias
         persistence.ExecuteInTransaction(Arg.Any<Func<Task<List<AvailabilityModel.Response>>>>())
             .Returns(call => call.Arg<Func<Task<List<AvailabilityModel.Response>>>>()());
 
-        return new AvailabilityService(persistence, holidays);
+        return new AvailabilityService(persistence, holidays, NullLogger<AvailabilityService>.Instance);
     }
 
     private static AvailabilityModel.Request CrearRequestDeDisponibilidad(
@@ -1889,6 +1931,21 @@ public class PruebasUnitarias
         {
             inner.Dispose();
             return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Information)
+                Messages.Add(formatter(state, exception));
         }
     }
 }
