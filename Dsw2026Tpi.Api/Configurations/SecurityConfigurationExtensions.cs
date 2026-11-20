@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.CrossCutting.Identity;
+using Dsw2026Tpi.CrossCutting.Identity;
 using Dsw2026Tpi.CrossCutting.Models;
 using Dsw2026Tpi.CrossCutting.Resources;
 using Dsw2026Tpi.Data.Identity;
@@ -121,6 +121,13 @@ public static class SecurityConfigurationExtensions
                 RequireLowercase = true,
                 RequireUppercase = true,
                 RequireDigit = true
+            };
+
+            options.Lockout = new LockoutOptions
+            {
+                AllowedForNewUsers = true,
+                MaxFailedAccessAttempts = 5,
+                DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15)
             };
 
         }).AddRoles<IdentityRole>()

@@ -1,4 +1,4 @@
-﻿using Dsw2026Tpi.Api.Configurations;
+using Dsw2026Tpi.Api.Configurations;
 using Dsw2026Tpi.Api.Controllers;
 using Dsw2026Tpi.Api.Middlewares;
 using Dsw2026Tpi.Application.Dtos;
@@ -27,6 +27,11 @@ using Xunit;
 using Dsw2026Tpi.CrossCutting.Identity;
 using System.Text.Json;
 using Dsw2026Tpi.CrossCutting.Resources;
+using Dsw2026Tpi.Api.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using AuthenticationService = Dsw2026Tpi.Application.Services.AuthenticationService;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -1491,6 +1496,176 @@ public class PruebasUnitarias
     private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
         CrearAuthenticationService()
     {
+        var (service, userManager, _, logger) = CrearAuthenticationServiceConSignIn();
+        return (service, userManager, logger);
+    }
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioNoExiste_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        userManager.FindByEmailAsync("admin@utn.com").Returns((ApplicationUser?)null);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("Admin123!", log.Message);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioEstaEliminado_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = true
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoEmailNoEstaConfirmado_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = false,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoCuentaEstaBloqueada_LanzaAuthenticationExceptionYLogueaWarningSinValidarPassword()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(true);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoPasswordEsIncorrecta_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "admin@utn.com",
+            Email = "admin@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(false);
+        signInService.CheckPassword(user, "Incorrecta1").Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com", "Incorrecta1")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("Incorrecta1", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoUsuarioNoTieneRolAdministrador_LanzaAuthenticationExceptionYLogueaWarning()
+    {
+        var (service, userManager, signInService, logger) = CrearAuthenticationServiceConSignIn();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@utn.com",
+            Email = "paciente@utn.com",
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@utn.com").Returns(user);
+        userManager.IsLockedOutAsync(user).Returns(false);
+        signInService.CheckPassword(user, "Admin123!").Returns(true);
+        userManager.IsInRoleAsync(user, Roles.Administrator).Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("paciente@utn.com", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+    }
+
+    [Fact]
+    public async Task SignInService_CheckPassword_HabilitaLockoutEnFallos()
+    {
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        var signInManager = Substitute.For<SignInManager<ApplicationUser>>(
+            userManager,
+            Substitute.For<IHttpContextAccessor>(),
+            Substitute.For<IUserClaimsPrincipalFactory<ApplicationUser>>(),
+            Options.Create(new IdentityOptions()),
+            Substitute.For<ILogger<SignInManager<ApplicationUser>>>(),
+            Substitute.For<IAuthenticationSchemeProvider>(),
+            Substitute.For<IUserConfirmation<ApplicationUser>>());
+
+        var user = new ApplicationUser { UserName = "admin@utn.com", Email = "admin@utn.com" };
+        signInManager.CheckPasswordSignInAsync(user, "Admin123!", true)
+            .Returns(Microsoft.AspNetCore.Identity.SignInResult.Success);
+
+        var service = new SignInService(signInManager);
+        var result = await service.CheckPassword(user, "Admin123!");
+
+        Assert.True(result);
+        await signInManager.Received(1).CheckPasswordSignInAsync(user, "Admin123!", true);
+    }
+
+    [Fact]
+    public void AddAppIdentity_ConfiguraLockoutHabilitado()
+    {
+        var services = new ServiceCollection();
+        services.AddAppIdentity();
+
+        using var provider = services.BuildServiceProvider();
+        var options = provider.GetRequiredService<IOptions<IdentityOptions>>().Value;
+
+        Assert.True(options.Lockout.AllowedForNewUsers);
+        Assert.Equal(5, options.Lockout.MaxFailedAccessAttempts);
+        Assert.Equal(TimeSpan.FromMinutes(15), options.Lockout.DefaultLockoutTimeSpan);
+    }
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, ISignInService SignInService, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationServiceConSignIn()
+    {
         var userManager = Substitute.For<UserManager<ApplicationUser>>(
             Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         var signInService = Substitute.For<ISignInService>();
@@ -1499,7 +1674,7 @@ public class PruebasUnitarias
         var logger = new TestLogger<AuthenticationService>();
 
         var service = new AuthenticationService(userManager, signInService, roleManager, null!, logger);
-        return (service, userManager, logger);
+        return (service, userManager, signInService, logger);
     }
 
     private sealed class TestLogger<T> : ILogger<T>
