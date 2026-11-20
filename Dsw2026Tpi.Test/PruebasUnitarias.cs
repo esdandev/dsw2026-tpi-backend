@@ -969,8 +969,84 @@ public class PruebasUnitarias
 
         persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
         persistence.GetFiltered<Appointment>(
-              
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(Enumerable.Empty<Appointment>());
 
+        await service.Delete(doctor.Id);
+
+        Assert.True(doctor.Deleted);
+        await persistence.Received(1).Update(doctor);
+    }
+
+    [Fact]
+    public async Task SecurityHeadersMiddleware_AgregaHeadersYElCspSoloEnProduccion()
+    {
+        var development = new DefaultHttpContext();
+        var developmentEnvironment = Substitute.For<IWebHostEnvironment>();
+        developmentEnvironment.EnvironmentName.Returns("Development");
+
+        await new SecurityHeadersMiddleware(_ => Task.CompletedTask, developmentEnvironment)
+            .InvokeAsync(development);
+
+        Assert.Equal("nosniff", development.Response.Headers["X-Content-Type-Options"].ToString());
+        Assert.Equal("DENY", development.Response.Headers["X-Frame-Options"].ToString());
+        Assert.Equal("no-referrer", development.Response.Headers["Referrer-Policy"].ToString());
+        Assert.False(development.Response.Headers.ContainsKey("Content-Security-Policy"));
+
+        var production = new DefaultHttpContext();
+        var productionEnvironment = Substitute.For<IWebHostEnvironment>();
+        productionEnvironment.EnvironmentName.Returns("Production");
+
+        await new SecurityHeadersMiddleware(_ => Task.CompletedTask, productionEnvironment)
+            .InvokeAsync(production);
+
+        Assert.Equal("default-src 'none'; frame-ancestors 'none'", production.Response.Headers["Content-Security-Policy"].ToString());
+    }
+
+    [Fact]
+    public void BuildForwardedHeadersOptions_CuandoEstaDeshabilitado_DevuelveNull()
+    {
+        var configuration = new ConfigurationBuilder().Build();
+
+        Assert.Null(ForwardedHeadersConfigurationExtensions.BuildForwardedHeadersOptions(configuration));
+    }
+
+    [Fact]
+    public void BuildForwardedHeadersOptions_CuandoEstaHabilitado_SoloConfiaEnLosProxiesConfigurados()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ForwardedHeaders:Enabled"] = "true",
+                ["ForwardedHeaders:KnownProxies:0"] = "10.0.0.1",
+                ["ForwardedHeaders:KnownProxies:1"] = "10.0.0.2"
+            })
+            .Build();
+
+        var options = ForwardedHeadersConfigurationExtensions.BuildForwardedHeadersOptions(configuration);
+
+        Assert.NotNull(options);
+        Assert.Equal(ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto, options!.ForwardedHeaders);
+        Assert.Equal(1, options.ForwardLimit);
+        Assert.Equal(2, options.KnownProxies.Count);
+        Assert.Contains(IPAddress.Parse("10.0.0.1"), options.KnownProxies);
+        Assert.Empty(options.KnownNetworks);
+    }
+
+    [Fact]
+    public void BuildForwardedHeadersOptions_CuandoLaIpDelProxyEsInvalida_LanzaInvalidOperationException()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ForwardedHeaders:Enabled"] = "true",
+                ["ForwardedHeaders:KnownProxies:0"] = "no-es-una-ip"
+            })
+            .Build();
+
+        Assert.Throws<InvalidOperationException>(() =>
+            ForwardedHeadersConfigurationExtensions.BuildForwardedHeadersOptions(configuration));
+    }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(
         IPersistence persistence, IHolidayProvider holidays)
