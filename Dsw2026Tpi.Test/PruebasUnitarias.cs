@@ -873,7 +873,44 @@ public class PruebasUnitarias
 
         Assert.Equal(valido, result.IsValid);
     }
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(-1234567, false)]
+    [InlineData(123456, false)]
+    [InlineData(1234567, true)]
+    [InlineData(12345678, true)]
+    [InlineData(123456789, false)]
+    public void LoginPatientValidator_ValidaCantidadDeDigitosDelDni(long dni, bool valido)
+    {
+        var validator = new LoginPatientValidator();
+        var request = new LoginPatientModel.Request("paciente@email.com", dni);
 
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(123456, false)]
+    [InlineData(1234567, true)]
+    [InlineData(12345678, true)]
+    [InlineData(123456789, true)]
+    [InlineData(1234567890, true)]
+    [InlineData(12345678901, false)]
+    public void AppointmentCreateRequestValidator_ValidaCantidadDeDigitosDelDni(long dni, bool valido)
+    {
+        var validator = new AppointmentCreateRequestValidator();
+        var request = new AppointmentModel.CreateRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new AppointmentModel.PatientRequest(dni),
+            "Control de rutina");
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
     [Fact]
     public async Task AvailabilityController_Create_Devuelve201SinHeaderLocation()
     {
