@@ -12,7 +12,7 @@ public class LoginPatientValidator : AbstractValidator<LoginPatientModel.Request
             .WithMessage("formato inválido");
 
         RuleFor(x => x.Dni)
-            .Must(dni => dni.IsDniValid())
+            .Must(dni => dni.IsDniValid(7, 8))
             .WithMessage("debe tener 7 u 8 dígitos");
 
         RuleFor(x => x.FirstName)

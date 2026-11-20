@@ -710,7 +710,8 @@ public class PruebasUnitarias
                 service,
                 new AppointmentCreateRequestValidator(),
                 new AppointmentGetByDateQueryValidator(),
-                new AppointmentSearchQueryValidator())
+                new AppointmentSearchQueryValidator(),
+                new AppointmentGetByPatientQueryValidator())
             {
                 ControllerContext = new ControllerContext { HttpContext = httpContext }
             };
@@ -931,7 +932,116 @@ public class PruebasUnitarias
         var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status201Created, objectResult.StatusCode);
     }
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(0L, false)]
+    [InlineData(123456L, false)]
+    [InlineData(1234567L, true)]
+    [InlineData(12345678L, true)]
+    [InlineData(123456789L, false)]
+    public void AppointmentGetByPatientQueryValidator_ValidaDniObligatorioYEntre7Y8Digitos(long? dni, bool valido)
+    {
+        var validator = new AppointmentGetByPatientQueryValidator();
+        var result = validator.Validate(new AppointmentModel.GetByPatientQuery(dni));
 
+        Assert.Equal(valido, result.IsValid);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(123L)]
+    [InlineData(123456789L)]
+    public async Task AppointmentController_GetByPatient_CuandoDniFaltaOEsInvalido_LanzaValidationExceptionYNoLlamaAlServicio(long? dni)
+    {
+        var service = Substitute.For<IAppointmentService>();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, "paciente@email.com")], "TestAuth"))
+        };
+        var controller = new AppointmentController(
+            service,
+            new AppointmentCreateRequestValidator(),
+            new AppointmentGetByDateQueryValidator(),
+            new AppointmentSearchQueryValidator(),
+            new AppointmentGetByPatientQueryValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => controller.GetByPatient(dni));
+
+        await service.DidNotReceive().GetByPatient(Arg.Any<long>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task AppointmentService_GetByPatient_CuandoDniNoCoincideConUsuarioAutenticado_LanzaAuthenticationException()
+    {
+        var patient = new ApplicationUser { Id = "p1", UserName = "paciente@email.com", Dni = 40123456 };
+        _userManager.FindByNameAsync("paciente@email.com").Returns(patient);
+
+        var act = () => _appointmentTest.GetByPatient(40999999, "paciente@email.com");
+
+        await Assert.ThrowsAsync<AuthenticationException>(act);
+    }
+
+    [Fact]
+    public async Task AppointmentService_GetByPatient_DevuelveSoloTurnosBookedActivosSinPaginar()
+    {
+        var patient = new ApplicationUser { Id = "p1", UserName = "paciente@email.com", Dni = 40123456 };
+        var doctor = CrearDoctor();
+        var slotFuturo = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.Now.AddDays(1),
+            End = Clock.Now.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED
+        };
+        var slotPasado = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.Now.AddMinutes(-30),
+            End = Clock.Now,
+            Status = SlotStatus.BOOKED
+        };
+
+        var turnoActivo = new Appointment(slotFuturo, patient.Id, "Control de rutina");
+        var turnoCancelado = new Appointment(slotFuturo, patient.Id, "Cancelado");
+        turnoCancelado.Cancel();
+        var turnoAtendido = new Appointment(slotFuturo, patient.Id, "Atendido");
+        turnoAtendido.MarkAttended();
+        var turnoPasado = new Appointment(slotPasado, patient.Id, "Turno viejo");
+        var turnoOtroPaciente = new Appointment(slotFuturo, "otro-paciente", "Otro");
+
+        _userManager.FindByNameAsync("paciente@email.com").Returns(patient);
+
+        Expression<Func<Appointment, bool>>? filtroCapturado = null;
+        _persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(),
+                Arg.Any<string[]>())
+            .Returns(call =>
+            {
+                filtroCapturado = call.Arg<Expression<Func<Appointment, bool>>>();
+                return Task.FromResult<IEnumerable<Appointment>?>(new[] { turnoActivo });
+            });
+
+        var result = (await _appointmentTest.GetByPatient(patient.Dni, "paciente@email.com")).ToList();
+
+        var item = Assert.Single(result);
+        Assert.Equal(turnoActivo.Id, item.Id);
+        Assert.Equal("BOOKED", item.Status);
+
+        var predicate = filtroCapturado!.Compile();
+        Assert.True(predicate(turnoActivo));
+        Assert.False(predicate(turnoCancelado));
+        Assert.False(predicate(turnoAtendido));
+        Assert.False(predicate(turnoPasado));
+        Assert.False(predicate(turnoOtroPaciente));
+    }
     private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
     {
         public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable) { }
