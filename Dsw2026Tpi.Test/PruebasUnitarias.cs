@@ -779,6 +779,65 @@ public class PruebasUnitarias
     }
 
     [Fact]
+    public async Task AppointmentCancel_CuandoElTurnoYaPaso_LanzaConflictException()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = Clock.Now.AddMinutes(-30),
+            End = Clock.Now,
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+
+        // Act
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            _appointmentTest.Cancel(appointment.Id, patient.UserName!));
+
+        // Assert
+        Assert.Equal("APPOINTMENT_CONFLICT", ex.Error.ErrorCode);
+        Assert.Equal(AppointmentStatus.BOOKED, appointment.Status);
+        Assert.Equal(SlotStatus.BOOKED, slot.Status);
+        await _persistence.DidNotReceive().Update(appointment);
+    }
+
+    [Fact]
+    public async Task AppointmentCancel_CuandoElTurnoEsFuturo_CancelaYLiberaElSlot()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = Clock.Now.AddDays(1),
+            End = Clock.Now.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+
+        // Act
+        await _appointmentTest.Cancel(appointment.Id, patient.UserName!);
+
+        // Assert
+        Assert.Equal(AppointmentStatus.CANCELLED, appointment.Status);
+        Assert.Equal(SlotStatus.AVAILABLE, slot.Status);
+        Assert.Equal(0, slot.BookedCount);
+        await _persistence.Received(1).Update(appointment);
+    }
+
+    [Fact]
     public async Task ExceptionHandlingMiddleware_CuandoRecibeDbUpdateConcurrencyException_Devuelve409()
     {
         // Arrange
@@ -794,6 +853,54 @@ public class PruebasUnitarias
 
         // Assert
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task DoctorService_Delete_CuandoTieneTurnosFuturos_LanzaConflictException()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new DoctorService(persistence);
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Test", "MP-1", speciality);
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.Now.AddDays(1),
+            End = Clock.Now.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED
+        };
+        var appointment = new Appointment(slot, "patient-1", "Control de rutina");
+
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+        persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { appointment });
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() => service.Delete(doctor.Id));
+
+        Assert.Equal("DOCTOR_HAS_FUTURE_APPOINTMENTS", ex.Error.ErrorCode);
+        Assert.False(doctor.Deleted);
+        await persistence.DidNotReceive().Update(doctor);
+    }
+
+    [Fact]
+    public async Task DoctorService_Delete_SinTurnosFuturos_MarcaComoEliminado()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = new DoctorService(persistence);
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Test", "MP-1", speciality);
+
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+        persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(Enumerable.Empty<Appointment>());
+
+        await service.Delete(doctor.Id);
+
+        Assert.True(doctor.Deleted);
+        await persistence.Received(1).Update(doctor);
     }
 
     [Fact]

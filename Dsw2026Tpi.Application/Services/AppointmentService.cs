@@ -87,6 +87,11 @@ public class AppointmentService : IAppointmentService
             throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "Solo se pueden cancelar turnos reservados");
         }
 
+        if (appointment.AvailabilitySlot is not null && appointment.AvailabilitySlot.Start <= Clock.Now)
+        {
+            throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "No se pueden cancelar turnos pasados");
+        }
+
         appointment.Cancel();
 
         try
