@@ -793,6 +793,81 @@ public class PruebasUnitarias
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
     }
 
+    [Fact]
+    public async Task Create_CuandoLosHorariosDelMismoDiaSeSolapan_LanzaValidationException()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var act = () => service.Create(CrearRequestDeDisponibilidad(doctor,
+            ("LUNES", "09:00", "10:00"), ("LUNES", "09:30", "10:30")));
+
+        await Assert.ThrowsAsync<ValidationException>(act);
+    }
+
+    [Fact]
+    public async Task Create_CuandoElMismoHorarioEsEnOtroDia_NoLoConsideraSolapamiento()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var rules = new List<AvailabilityRule>();
+        persistence.Add(Arg.Do<AvailabilityRule>(rule => rules.Add(rule)));
+
+        await service.Create(CrearRequestDeDisponibilidad(doctor,
+            ("LUNES", "09:00", "10:00"), ("MARTES", "09:30", "10:30")));
+
+        Assert.Equal(2, rules.Count);
+    }
+
+    [Fact]
+    public async Task Update_ExcluyeFeriadosAlRegenerarSlots()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var holidays = Substitute.For<IHolidayProvider>();
+        holidays.IsNonWorkingDay(Arg.Any<DateOnly>())
+            .Returns(call => call.Arg<DateOnly>().DayOfWeek == DayOfWeek.Monday);
+        var service = CrearServicioDeDisponibilidad(persistence, holidays);
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var slots = new List<AvailabilitySlot>();
+        persistence.AddRange(Arg.Do<IEnumerable<AvailabilitySlot>>(list => slots.AddRange(list)));
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "09:00", "10:00"))
+            .ToArray();
+
+        await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        Assert.DoesNotContain(slots, slot => Clock.ToArgentina(slot.Start).DayOfWeek == DayOfWeek.Monday);
+    }
+
+    [Fact]
+    public async Task Update_NoGeneraSlotsVencidosDelDiaActual()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var slots = new List<AvailabilitySlot>();
+        persistence.AddRange(Arg.Do<IEnumerable<AvailabilitySlot>>(list => slots.AddRange(list)));
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "00:00", "23:30"))
+            .ToArray();
+
+        var antes = Clock.Now;
+        await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        Assert.All(slots, slot => Assert.True(slot.Start > antes, $"slot vencido generado: {slot.Start:O}"));
+    }
+
     private static AvailabilityService CrearServicioDeDisponibilidad(
         IPersistence persistence, IHolidayProvider holidays)
     {
