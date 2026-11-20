@@ -776,6 +776,65 @@ public class PruebasUnitarias
     }
 
     [Fact]
+    public async Task AppointmentCancel_CuandoElTurnoYaPaso_LanzaConflictException()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = Clock.Now.AddMinutes(-30),
+            End = Clock.Now,
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+
+        // Act
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            _appointmentTest.Cancel(appointment.Id, patient.UserName!));
+
+        // Assert
+        Assert.Equal("APPOINTMENT_CONFLICT", ex.Error.ErrorCode);
+        Assert.Equal(AppointmentStatus.BOOKED, appointment.Status);
+        Assert.Equal(SlotStatus.BOOKED, slot.Status);
+        await _persistence.DidNotReceive().Update(appointment);
+    }
+
+    [Fact]
+    public async Task AppointmentCancel_CuandoElTurnoEsFuturo_CancelaYLiberaElSlot()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = Clock.Now.AddDays(1),
+            End = Clock.Now.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+
+        // Act
+        await _appointmentTest.Cancel(appointment.Id, patient.UserName!);
+
+        // Assert
+        Assert.Equal(AppointmentStatus.CANCELLED, appointment.Status);
+        Assert.Equal(SlotStatus.AVAILABLE, slot.Status);
+        Assert.Equal(0, slot.BookedCount);
+        await _persistence.Received(1).Update(appointment);
+    }
+
+    [Fact]
     public async Task ExceptionHandlingMiddleware_CuandoRecibeDbUpdateConcurrencyException_Devuelve409()
     {
         // Arrange
