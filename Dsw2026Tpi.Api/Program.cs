@@ -20,6 +20,7 @@ public class Program
             Log.Information("Iniciando aplicación Dsw2026Tpi.Api");
 
             var builder = WebApplication.CreateBuilder(args);
+            builder.WebHost.ConfigureKestrel(options => options.AddServerHeader = false);
 
             builder.AddSerilogConfiguration();
             builder.Services.AddAppIdentity();
@@ -54,11 +55,14 @@ public class Program
 
             await app.SeedIdentityAsync();
 
+            app.UseAppForwardedHeaders(builder.Configuration);
+            app.UseMiddleware<SecurityHeadersMiddleware>();
             app.UseMiddleware<ExceptionHandlingMiddleware>();
             app.UseSerilogRequestLogging();
 
             if (app.Environment.IsProduction())
             {
+                app.UseHsts();
                 app.UseHttpsRedirection();
             }
 

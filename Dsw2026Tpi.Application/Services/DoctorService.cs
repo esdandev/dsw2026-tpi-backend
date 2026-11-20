@@ -1,6 +1,7 @@
 ﻿using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.CrossCutting.Exceptions;
+using Dsw2026Tpi.CrossCutting.Resources;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using Dsw2026Tpi.CrossCutting.Helpers;
@@ -126,6 +127,14 @@ public class DoctorService : IDoctorService
         var doctor = await _persistence.GetById<Doctor>(id);
         if (doctor is null || doctor.Deleted)
             throw new EntityNotFoundException(DoctorNotFound);
+
+        var futureAppointments = await _persistence.GetFiltered<Appointment>(appointment =>
+            appointment.Status == AppointmentStatus.BOOKED &&
+            appointment.AvailabilitySlot!.DoctorId == id &&
+            appointment.AvailabilitySlot.Start > Clock.Now);
+
+        if (futureAppointments != null && futureAppointments.Any())
+            throw new ConflictException(nameof(ErrorCodes.DOCTOR_HAS_FUTURE_APPOINTMENTS), ErrorCodes.DOCTOR_HAS_FUTURE_APPOINTMENTS);
 
         doctor.MarkAsDeleted();
         await _persistence.Update(doctor);
