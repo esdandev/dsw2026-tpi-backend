@@ -8,6 +8,10 @@
     "Audience": "Dsw2026Tpi.ApiUsers",
     "ExpiresInMinutes": 60
   },
+  "ForwardedHeaders": {
+    "Enabled": false,
+    "KnownProxies": []
+  },
   "Seed": {
     "Admin": {
       "Email": "",
