@@ -10,9 +10,12 @@ public static class ValidationsExtensions
         return !string.IsNullOrWhiteSpace(email) &&
             Regex.IsMatch(email, EmailPattern);
     }
-    public static bool IsDniValid(this long dni)
-{
-    var length = dni.ToString().Length;
-    return dni > 0 && length is 7 or 8;
-}
+    public static bool IsDniValid(this long dni, int minDigits = 7, int maxDigits = 8)
+    {
+        if (dni <= 0)
+            return false;
+
+        var length = dni.ToString().Length;
+        return length >= minDigits && length <= maxDigits;
+    }
 }

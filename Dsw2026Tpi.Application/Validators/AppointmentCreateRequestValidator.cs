@@ -23,14 +23,16 @@ public class AppointmentCreateRequestValidator : AbstractValidator<AppointmentMo
         When(x => x.Patient is not null, () =>
         {
             RuleFor(x => x.Patient!.Dni)
-                .Must(dni => dni.IsDniValid())
-                .WithMessage("debe tener 7 u 8 dígitos");
+                .Must(dni => dni.IsDniValid(7, 10))
+                .WithMessage("debe tener entre 7 y 10 dígitos");
         });
 
         RuleFor(x => x.Reason)
             .NotEmpty()
             .WithMessage("es obligatorio")
             .MinimumLength(5)
-            .WithMessage("debe tener al menos 5 caracteres");
+            .WithMessage("debe tener al menos 5 caracteres")
+            .MaximumLength(300)
+            .WithMessage("no puede superar los 300 caracteres");
     }
 }

@@ -1,5 +1,7 @@
-﻿using System.Linq.Expressions;
+﻿using Dsw2026Tpi.Api.Controllers;
+using Dsw2026Tpi.Api.Middlewares;
 using Dsw2026Tpi.Application.Dtos;
+using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.Application.Services;
 using Dsw2026Tpi.Application.Validators;
 using Dsw2026Tpi.CrossCutting.Exceptions;
@@ -7,9 +9,18 @@ using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Data.Identity;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Query;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
+using System.Linq.Expressions;
+using System.Security.Claims;
 using Xunit;
+using Dsw2026Tpi.Application.Interfaces;
+using Microsoft.EntityFrameworkCore.Query;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -22,6 +33,11 @@ public class PruebasUnitarias
     public PruebasUnitarias()
     {
         _persistence = Substitute.For<IPersistence>();
+        _persistence.ExecuteInTransaction(Arg.Any<Func<Task<AppointmentModel.CreateResponse>>>())
+            .Returns(call => call.Arg<Func<Task<AppointmentModel.CreateResponse>>>()());
+        _persistence.ExecuteInTransaction(Arg.Any<Func<Task>>())
+            .Returns(call => call.Arg<Func<Task>>()());
+
         _userManager = Substitute.For<UserManager<ApplicationUser>>(Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
         _appointmentTest = new AppointmentService(_persistence, _userManager); //Objeto de prueba
     }
@@ -623,6 +639,155 @@ public class PruebasUnitarias
         Assert.Contains("Speciality", ex.Error.Message);
         Assert.DoesNotContain("SpecialityId", ex.Error.Message);
     }
+    [Fact]
+    public async Task AppointmentCreate_DosReservasSimultaneas_UnaDevuelve201YOtra409()
+    {
+        // Arrange
+        var doctorId = Guid.NewGuid();
+        var slotId = Guid.NewGuid();
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", speciality, doctorId);
+
+        var slotStart = DateTime.UtcNow.AddDays(1);
+        var slotEnd = slotStart.AddMinutes(30);
+
+        var paciente1 = new ApplicationUser { Id = "p1", UserName = "p1@email.com", Email = "p1@email.com", Dni = 40111111 };
+        var paciente2 = new ApplicationUser { Id = "p2", UserName = "p2@email.com", Email = "p2@email.com", Dni = 40222222 };
+
+        var persistence = Substitute.For<IPersistence>();
+        persistence.ExecuteInTransaction(Arg.Any<Func<Task<AppointmentModel.CreateResponse>>>())
+            .Returns(call => call.Arg<Func<Task<AppointmentModel.CreateResponse>>>()());
+        persistence.GetById<Doctor>(doctorId).Returns(doctor);
+
+        // Simula dos lecturas concurrentes del mismo slot disponible (como dos DbContext en paralelo)
+        var ambasLecturasListas = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var contadorLecturas = 0;
+        persistence.GetById<AvailabilitySlot>(slotId).Returns(async _ =>
+        {
+            var copiaSlot = new AvailabilitySlot
+            {
+                Id = slotId,
+                DoctorId = doctorId,
+                Start = slotStart,
+                End = slotEnd,
+                Status = SlotStatus.AVAILABLE
+            };
+
+            if (Interlocked.Increment(ref contadorLecturas) == 2)
+                ambasLecturasListas.TrySetResult();
+
+            await ambasLecturasListas.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            return copiaSlot;
+        });
+
+        // Solo el primer Update pasa; el segundo falla por RowVersion (DbUpdateConcurrencyException)
+        var yaReservado = 0;
+        persistence.Update(Arg.Any<AvailabilitySlot>()).Returns(call =>
+        {
+            if (Interlocked.Exchange(ref yaReservado, 1) == 1)
+                return Task.FromException<AvailabilitySlot>(
+                    new DbUpdateConcurrencyException("Conflicto de concurrencia en AvailabilitySlot"));
+
+            return Task.FromResult(call.Arg<AvailabilitySlot>());
+        });
+
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        userManager.FindByNameAsync(paciente1.UserName!).Returns(paciente1);
+        userManager.FindByNameAsync(paciente2.UserName!).Returns(paciente2);
+
+        var service = new AppointmentService(persistence, userManager);
+        var middlewareLogger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+
+        async Task<int> EjecutarReservaHttp(ApplicationUser paciente)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Response.Body = new MemoryStream();
+            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, paciente.UserName!)], "TestAuth"));
+
+            var controller = new AppointmentController(
+                service,
+                new AppointmentCreateRequestValidator(),
+                new AppointmentGetByDateQueryValidator(),
+                new AppointmentSearchQueryValidator())
+            {
+                ControllerContext = new ControllerContext { HttpContext = httpContext }
+            };
+
+            var request = new AppointmentModel.CreateRequest(
+                doctorId,
+                slotId,
+                new AppointmentModel.PatientRequest(paciente.Dni),
+                "Control de rutina");
+
+            var middleware = new ExceptionHandlingMiddleware(async ctx =>
+            {
+                var actionResult = await controller.Create(request);
+                if (actionResult is ObjectResult objectResult && objectResult.StatusCode.HasValue)
+                    ctx.Response.StatusCode = objectResult.StatusCode.Value;
+            }, middlewareLogger);
+
+            await middleware.InvokeAsync(httpContext);
+            return httpContext.Response.StatusCode;
+        }
+
+        // Act
+        var statusCodes = await Task.WhenAll(
+            EjecutarReservaHttp(paciente1),
+            EjecutarReservaHttp(paciente2));
+
+        // Assert
+        Assert.Contains(StatusCodes.Status201Created, statusCodes);
+        Assert.Contains(StatusCodes.Status409Conflict, statusCodes);
+        await persistence.Received(1).Add(Arg.Any<Appointment>());
+    }
+
+    [Fact]
+    public async Task AppointmentCancel_CuandoHayConflictoDeConcurrencia_LanzaConflictException()
+    {
+        // Arrange
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = Guid.NewGuid(),
+            Start = DateTime.UtcNow.AddDays(1),
+            End = DateTime.UtcNow.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+        var patient = new ApplicationUser { Id = "patient-1", UserName = "paciente@email.com", Dni = 40123456 };
+        var appointment = new Appointment(slot, patient.Id, "Control de rutina");
+
+        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
+        _userManager.FindByNameAsync(patient.UserName!).Returns(patient);
+        _persistence.Update(Arg.Any<AvailabilitySlot>())
+            .Returns(Task.FromException<AvailabilitySlot>(new DbUpdateConcurrencyException("Conflicto de concurrencia")));
+
+        // Act
+        var act = () => _appointmentTest.Cancel(appointment.Id, patient.UserName!);
+
+        // Assert
+        await Assert.ThrowsAsync<ConflictException>(act);
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoRecibeDbUpdateConcurrencyException_Devuelve409()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new DbUpdateConcurrencyException("Conflicto de concurrencia"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+    }
 
     private static AvailabilityService CrearServicioDeDisponibilidad(
         IPersistence persistence, IHolidayProvider holidays)
@@ -652,4 +817,162 @@ public class PruebasUnitarias
 
     private static Doctor CrearDoctor() =>
         new("Dra. Ana López", "MP1234", new Speciality("Clínica", "Clínica médica"));
+    [Fact]
+    public async Task AppointmentGetByDate_CuandoHayTurnoHuerfanoSinPaciente_NoLanzaKeyNotFoundException()
+    {
+        // Arrange
+        var speciality = new Speciality("Cardiología", "Especialidad del corazón");
+        var doctor = new Doctor("Dr. Juan Pérez", "MP1234", speciality);
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.FromArgentina(new DateTime(2026, 11, 20, 10, 0, 0)),
+            End = Clock.FromArgentina(new DateTime(2026, 11, 20, 10, 30, 0)),
+            Status = SlotStatus.BOOKED
+        };
+        var appointment = new Appointment(slot, "usuario-inexistente", "Control de rutina");
+
+        _persistence.Paginate<Appointment, DateTime>(
+                Arg.Any<int>(),
+                Arg.Any<int>(),
+                Arg.Any<Expression<Func<Appointment, bool>>>(),
+                Arg.Any<Expression<Func<Appointment, DateTime>>>(),
+                Arg.Any<string[]>())
+            .Returns(new Pagination<Appointment>(10, 0, 1, [appointment]));
+
+        _userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>(Array.Empty<ApplicationUser>()));
+
+        // Act
+        var result = await _appointmentTest.GetByDate(new DateOnly(2026, 11, 20), 10, 0);
+
+        // Assert
+        var item = Assert.Single(result.Data);
+        Assert.Equal(0, item.Patient.Dni);
+        Assert.Equal("Paciente desconocido", item.Patient.FullName);
+    }
+
+    [Theory]
+    [InlineData("", false)]
+    [InlineData("abcd", false)]
+    [InlineData("abcde", true)]
+    [InlineData(300, true)]
+    [InlineData(301, false)]
+    public void AppointmentCreateRequestValidator_ValidaLongitudDeReason(object input, bool valido)
+    {
+        var reason = input is int length ? new string('a', length) : (string)input;
+        var validator = new AppointmentCreateRequestValidator();
+        var request = new AppointmentModel.CreateRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new AppointmentModel.PatientRequest(40123456),
+            reason);
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(-1234567, false)]
+    [InlineData(123456, false)]
+    [InlineData(1234567, true)]
+    [InlineData(12345678, true)]
+    [InlineData(123456789, false)]
+    public void LoginPatientValidator_ValidaCantidadDeDigitosDelDni(long dni, bool valido)
+    {
+        var validator = new LoginPatientValidator();
+        var request = new LoginPatientModel.Request("paciente@email.com", dni);
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(123456, false)]
+    [InlineData(1234567, true)]
+    [InlineData(12345678, true)]
+    [InlineData(123456789, true)]
+    [InlineData(1234567890, true)]
+    [InlineData(12345678901, false)]
+    public void AppointmentCreateRequestValidator_ValidaCantidadDeDigitosDelDni(long dni, bool valido)
+    {
+        var validator = new AppointmentCreateRequestValidator();
+        var request = new AppointmentModel.CreateRequest(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new AppointmentModel.PatientRequest(dni),
+            "Control de rutina");
+
+        var result = validator.Validate(request);
+
+        Assert.Equal(valido, result.IsValid);
+    }
+    [Fact]
+    public async Task AvailabilityController_Create_Devuelve201SinHeaderLocation()
+    {
+        var service = Substitute.For<IAvailabilityService>();
+        var doctorId = Guid.NewGuid();
+        service.Create(Arg.Any<AvailabilityModel.Request>())
+            .Returns([new AvailabilityModel.Response { Id = Guid.NewGuid(), DoctorId = doctorId }]);
+
+        var controller = new AvailabilityController(service, new AvailabilityRequestValidator());
+        var request = new AvailabilityModel.Request
+        {
+            DoctorId = doctorId.ToString(),
+            Days = [new AvailabilityModel.DayRequest { Day = "LUNES", StartTime = "09:00", EndTime = "12:00" }]
+        };
+
+        var result = await controller.Create(request);
+
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status201Created, objectResult.StatusCode);
+    }
+
+    private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
+    {
+        public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable) { }
+        public TestAsyncEnumerable(Expression expression) : base(expression) { }
+
+        IQueryProvider IQueryable.Provider => new TestAsyncQueryProvider<T>(this);
+
+        public IAsyncEnumerator<T> GetAsyncEnumerator(CancellationToken cancellationToken = default) =>
+            new TestAsyncEnumerator<T>(this.AsEnumerable().GetEnumerator());
+    }
+
+    private sealed class TestAsyncQueryProvider<TEntity>(IQueryProvider inner) : IAsyncQueryProvider
+    {
+        public IQueryable CreateQuery(Expression expression) => new TestAsyncEnumerable<TEntity>(expression);
+        public IQueryable<TElement> CreateQuery<TElement>(Expression expression) => new TestAsyncEnumerable<TElement>(expression);
+        public object? Execute(Expression expression) => inner.Execute(expression);
+        public TResult Execute<TResult>(Expression expression) => inner.Execute<TResult>(expression);
+
+        public TResult ExecuteAsync<TResult>(Expression expression, CancellationToken cancellationToken = default)
+        {
+            var expectedResultType = typeof(TResult).GetGenericArguments()[0];
+            var executionResult = typeof(IQueryProvider)
+                .GetMethod(nameof(IQueryProvider.Execute), 1, [typeof(Expression)])!
+                .MakeGenericMethod(expectedResultType)
+                .Invoke(inner, [expression]);
+
+            return (TResult)typeof(Task)
+                .GetMethod(nameof(Task.FromResult))!
+                .MakeGenericMethod(expectedResultType)
+                .Invoke(null, [executionResult])!;
+        }
+    }
+
+    private sealed class TestAsyncEnumerator<T>(IEnumerator<T> inner) : IAsyncEnumerator<T>
+    {
+        public T Current => inner.Current;
+        public ValueTask<bool> MoveNextAsync() => new(inner.MoveNext());
+        public ValueTask DisposeAsync()
+        {
+            inner.Dispose();
+            return ValueTask.CompletedTask;
+        }
+    }
 }

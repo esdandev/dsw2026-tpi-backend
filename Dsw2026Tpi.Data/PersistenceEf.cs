@@ -30,9 +30,26 @@ public class PersistenceEf: IPersistence
     public async Task<T> ExecuteInTransaction<T>(Func<Task<T>> action)
     {
         await using var transaction = await _context.Database.BeginTransactionAsync();
-        var result = await action();
-        await transaction.CommitAsync();
-        return result;
+        try
+        {
+            var result = await action();
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    public async Task ExecuteInTransaction(Func<Task> action)
+    {
+        await ExecuteInTransaction(async () =>
+        {
+            await action();
+            return true;
+        });
     }
 
     public async Task<T> Delete<T>(T entity) where T : EntityBase
