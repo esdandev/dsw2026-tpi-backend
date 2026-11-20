@@ -144,6 +144,9 @@
   <data name="SPECIALITY_NAME_CONFLICT" xml:space="preserve">
     <value>Ya existe una especialidad con ese nombre</value>
   </data>
+  <data name="SPECIALITY_IN_USE" xml:space="preserve">
+    <value>No se puede eliminar una especialidad con médicos activos</value>
+  </data>
   <data name="DOCTOR_LICENSE_CONFLICT" xml:space="preserve">
     <value>Ya existe un médico con ese número de matrícula</value>
   </data>

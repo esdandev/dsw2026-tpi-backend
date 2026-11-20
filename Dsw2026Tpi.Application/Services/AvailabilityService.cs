@@ -76,7 +76,7 @@ public class AvailabilityService : IAvailabilityService
         DayOfWeek.Sunday => "DOMINGO",
         _ => throw new ArgumentOutOfRangeException(nameof(dow))
     };
-    private async Task GenerateSlotsForRule(AvailabilityRule rule, DateTime fromDate, DateTime toDate)
+    private List<AvailabilitySlot> GenerateSlotsForRule(AvailabilityRule rule, DateTime fromDate, DateTime toDate)
     {
         var excluded = new HashSet<DateOnly>();
         if (!string.IsNullOrWhiteSpace(rule.ExcludedDatesCsv))
@@ -94,6 +94,7 @@ public class AvailabilityService : IAvailabilityService
 
         var current = fromDate.Date;
         var slotsToAdd = new List<AvailabilitySlot>();
+        var now = Clock.Now;
 
         while (current.Date <= toDate.Date)
         {
@@ -119,32 +120,37 @@ public class AvailabilityService : IAvailabilityService
             while (slotStart.Add(slotDuration) <= current.Add(endTime))
             {
                 var slotEnd = slotStart.Add(slotDuration);
-                var slot = new AvailabilitySlot
+                var startUtc = Clock.FromArgentina(slotStart);
+
+                if (startUtc > now)
                 {
-                    Id = Guid.NewGuid(),
-                    DoctorId = rule.DoctorId,
-                    RuleId = rule.Id,
-                    Start = Clock.FromArgentina(slotStart),
-                    End = Clock.FromArgentina(slotEnd),
-                    Status = SlotStatus.AVAILABLE,
-                    Capacity = rule.Capacity,
-                    BookedCount = 0
-                };
+                    var slot = new AvailabilitySlot
+                    {
+                        Id = Guid.NewGuid(),
+                        DoctorId = rule.DoctorId,
+                        RuleId = rule.Id,
+                        Start = startUtc,
+                        End = Clock.FromArgentina(slotEnd),
+                        Status = SlotStatus.AVAILABLE,
+                        Capacity = rule.Capacity,
+                        BookedCount = 0
+                    };
 
-                slotsToAdd.Add(slot);
+                    slotsToAdd.Add(slot);
+                }
 
-                slotStart = slotStart.Add(slotDuration);
+                slotStart = slotEnd;
             }
 
             current = current.AddDays(1);
         }
 
-        foreach (var s in slotsToAdd)
-        {
-            await _persistence.Add(s);
-        }
+        return slotsToAdd;
     }
-    public async Task<List<AvailabilityModel.Response>> Create(AvailabilityModel.Request request)
+    public Task<List<AvailabilityModel.Response>> Create(AvailabilityModel.Request request) =>
+        _persistence.ExecuteInTransaction(() => CreateCore(request));
+
+    private async Task<List<AvailabilityModel.Response>> CreateCore(AvailabilityModel.Request request)
     {
         var doctorId = Guid.Parse(request.DoctorId);
         var doctor = await _persistence.GetById<Doctor>(doctorId);
@@ -181,6 +187,7 @@ public class AvailabilityService : IAvailabilityService
 
         var groups = parsed.GroupBy(p => (p.Start, p.End));
         var createdRules = new List<AvailabilityRule>();
+        var slotsToAdd = new List<AvailabilitySlot>();
 
         foreach (var group in groups)
         {
@@ -201,11 +208,14 @@ public class AvailabilityService : IAvailabilityService
             };
 
             await _persistence.Add(rule);
-            await GenerateSlotsForRule(rule, today,
-                new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month)));
+            slotsToAdd.AddRange(GenerateSlotsForRule(rule, today,
+                new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month))));
 
             createdRules.Add(rule);
         }
+
+        if (slotsToAdd.Count > 0)
+            await _persistence.AddRange(slotsToAdd);
 
         return createdRules.Select(r => new AvailabilityModel.Response
         {
@@ -223,7 +233,10 @@ public class AvailabilityService : IAvailabilityService
             ExcludedDatesCsv = r.ExcludedDatesCsv
         }).ToList();
     }
-    public async Task<List<AvailabilityModel.Response>> Update(AvailabilityModel.Request request)
+    public Task<List<AvailabilityModel.Response>> Update(AvailabilityModel.Request request) =>
+        _persistence.ExecuteInTransaction(() => UpdateCore(request));
+
+    private async Task<List<AvailabilityModel.Response>> UpdateCore(AvailabilityModel.Request request)
     {
         var doctorId = Guid.Parse(request.DoctorId);
         var doctor = await _persistence.GetById<Doctor>(doctorId);
@@ -261,15 +274,20 @@ public class AvailabilityService : IAvailabilityService
 
         if (slotIds.Count > 0)
         {
-            var appointments = await _persistence.GetFiltered<Appointment>(appointment => slotIds.Contains(appointment.AvailabilitySlotId));
+            var appointments = await _persistence.GetFiltered<Appointment>(appointment =>
+                slotIds.Contains(appointment.AvailabilitySlotId));
 
             if (appointments != null)
-                referencedSlotIds = appointments.Select(appointment => appointment.AvailabilitySlotId).ToHashSet();
+                referencedSlotIds = appointments
+                    .Where(appointment => appointment.Status != AppointmentStatus.CANCELLED)
+                    .Select(appointment => appointment.AvailabilitySlotId)
+                    .ToHashSet();
         }
 
         var existingSlotsByStart = existingSlots.ToDictionary(slot => slot.Start, slot => slot);
         var desiredSlotStarts = new HashSet<DateTime>();
         var createdRules = new List<AvailabilityRule>();
+        var newSlots = new List<AvailabilitySlot>();
         var groups = parsed.GroupBy(schedule => (schedule.Start, schedule.End));
 
         foreach (var group in groups)
@@ -352,7 +370,7 @@ public class AvailabilityService : IAvailabilityService
                                 BookedCount = 0
                             };
 
-                            await _persistence.Add(newSlot);
+                            newSlots.Add(newSlot);
                         }
                     }
 
@@ -362,6 +380,9 @@ public class AvailabilityService : IAvailabilityService
                 currentDate = currentDate.AddDays(1);
             }
         }
+
+        if (newSlots.Count > 0)
+            await _persistence.AddRange(newSlots);
 
         foreach (var existingSlot in existingSlots)
         {

@@ -19,6 +19,7 @@ public class SpecialityConfiguration : IEntityTypeConfiguration<Speciality>
             .HasMaxLength(100);
 
         builder.Property(x => x.Description)
-            .HasMaxLength(500);
+            .IsRequired()
+            .HasMaxLength(100);
     }
 }

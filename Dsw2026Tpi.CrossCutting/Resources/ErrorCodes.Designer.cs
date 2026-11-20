@@ -160,6 +160,15 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
+        ///   Busca una cadena traducida similar a No se puede eliminar una especialidad con médicos activos.
+        /// </summary>
+        public static string SPECIALITY_IN_USE {
+            get {
+                return ResourceManager.GetString("SPECIALITY_IN_USE", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Busca una cadena traducida similar a Ya existe un médico con ese número de matrícula.
         /// </summary>
         public static string DOCTOR_LICENSE_CONFLICT {
