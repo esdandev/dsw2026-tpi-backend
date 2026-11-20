@@ -19,8 +19,6 @@ using NSubstitute;
 using System.Linq.Expressions;
 using System.Security.Claims;
 using Xunit;
-using Dsw2026Tpi.Application.Interfaces;
-using Microsoft.EntityFrameworkCore.Query;
 using Dsw2026Tpi.CrossCutting.Identity;
 using System.Text.Json;
 using Dsw2026Tpi.CrossCutting.Resources;
