@@ -5,6 +5,7 @@ using Dsw2026Tpi.CrossCutting.Identity;
 using Dsw2026Tpi.Data.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
+using Microsoft.EntityFrameworkCore;
 
 namespace Dsw2026Tpi.Application.Services;
 
@@ -56,28 +57,92 @@ public class AuthenticationService : IAuthenticationService
         // Si no existe, se registra automáticamente como paciente.
         if (user is null)
         {
+            var dniInUse = await _userManager.Users.AnyAsync(u => u.Dni == request.Dni);
+
+            if (dniInUse)
+            {
+                _logger.LogWarning(
+                    "Intento de login de paciente con DNI asociado a otro email. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
+                throw new ConflictException("PATIENT_DNI_CONFLICT", "El DNI ya se encuentra registrado con otro correo electrónico.");
+            }
+
+            var now = DateTime.UtcNow;
             user = new ApplicationUser
             {
                 UserName = request.Email,
                 Email = request.Email,
+                EmailConfirmed = true,
                 Dni = request.Dni,
                 FirstName = firstName,
                 LastName = lastName,
+                Deleted = false,
+                CreatedAt = now,
+                UpdatedAt = now
             };
 
             var createResult = await _userManager.CreateAsync(user);
 
             if (!createResult.Succeeded)
             {
+                _logger.LogWarning(
+                    "No se pudo auto-registrar el paciente. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
                 throw new AuthenticationException();
             }
 
-            await _userManager.AddToRoleAsync(user, Roles.Patient);
+            var roleResult = await _userManager.AddToRoleAsync(user, Roles.Patient);
+
+            if (!roleResult.Succeeded)
+            {
+                _logger.LogWarning(
+                    "No se pudo asignar el rol Paciente al usuario auto-registrado. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
+                throw new AuthenticationException();
+            }
         }
         else
         {
-            if (user.Dni != request.Dni)
+            if (user.Deleted)
+            {
+                _logger.LogWarning(
+                    "Intento de login de paciente con usuario eliminado. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
                 throw new AuthenticationException();
+            }
+
+            if (!user.EmailConfirmed)
+            {
+                _logger.LogWarning(
+                    "Intento de login de paciente con correo no confirmado. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
+                throw new AuthenticationException();
+            }
+
+            if (user.Dni != request.Dni)
+            {
+                _logger.LogWarning(
+                    "Intento de login de paciente con DNI incorrecto. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
+                throw new AuthenticationException();
+            }
+
+            var isPatient = await _userManager.IsInRoleAsync(user, Roles.Patient);
+
+            if (!isPatient)
+            {
+                _logger.LogWarning(
+                    "Intento de login de paciente con un usuario que no posee el rol Paciente. Email: {Email}, Dni: {MaskedDni}",
+                    request.Email,
+                    MaskDni(request.Dni));
+                throw new AuthenticationException();
+            }
 
             // Los pacientes registrados antes de que existiera el nombre lo completan en el próximo login.
             var updatedFirstName = firstName ?? user.FirstName;
@@ -87,20 +152,21 @@ public class AuthenticationService : IAuthenticationService
             {
                 user.FirstName = updatedFirstName;
                 user.LastName = updatedLastName;
+                user.UpdatedAt = DateTime.UtcNow;
                 await _userManager.UpdateAsync(user);
             }
-        }
-
-        var isPatient = await _userManager.IsInRoleAsync(user, Roles.Patient);
-
-        if (!isPatient)
-        {
-            _logger.LogWarning("Intento de login de paciente con un usuario que no posee el rol Paciente: {Email}", request.Email);
-            throw new AuthenticationException();
         }
 
         var token = _jwtService.GenerateToken(user.UserName!, Roles.Patient);
 
         return new LoginPatientModel.Response(token, Roles.Patient.ToUpperInvariant());
+    }
+
+    private static string MaskDni(long dni)
+    {
+        var digits = dni.ToString();
+        return digits.Length <= 3
+            ? new string('*', digits.Length)
+            : $"{new string('*', digits.Length - 3)}{digits[^3..]}";
     }
 }

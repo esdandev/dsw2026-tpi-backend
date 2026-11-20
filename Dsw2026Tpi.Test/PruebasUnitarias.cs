@@ -21,6 +21,7 @@ using System.Security.Claims;
 using Xunit;
 using Dsw2026Tpi.Application.Interfaces;
 using Microsoft.EntityFrameworkCore.Query;
+using Dsw2026Tpi.CrossCutting.Identity;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -1041,6 +1042,181 @@ public class PruebasUnitarias
         Assert.False(predicate(turnoAtendido));
         Assert.False(predicate(turnoPasado));
         Assert.False(predicate(turnoOtroPaciente));
+    }
+    [Fact]
+    public async Task LoginPatient_CuandoUsuarioEstaEliminado_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = true
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40123456)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoEmailNoEstaConfirmado_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = false,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40123456)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoEmailExisteConOtroDni_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40999999)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40999999", log.Message);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoDniPerteneceAOtroEmail_LanzaConflictExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var otroPaciente = new ApplicationUser
+        {
+            UserName = "otro@email.com",
+            Email = "otro@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("nuevo@email.com").Returns((ApplicationUser?)null);
+        userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>([otroPaciente]));
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("nuevo@email.com", 40123456)));
+
+        Assert.Equal("PATIENT_DNI_CONFLICT", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+        await userManager.DidNotReceive().CreateAsync(Arg.Any<ApplicationUser>());
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoUsuarioNoTieneRolPaciente_LanzaAuthenticationExceptionYNoActualizaNombre()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var admin = new ApplicationUser
+        {
+            UserName = "admin@email.com",
+            Email = "admin@email.com",
+            Dni = 99999999,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@email.com").Returns(admin);
+        userManager.IsInRoleAsync(admin, Roles.Patient).Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("admin@email.com", 99999999, "Nombre", "Nuevo")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("99999999", log.Message);
+        await userManager.DidNotReceive().UpdateAsync(Arg.Any<ApplicationUser>());
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoAutoRegistra_SeteaEmailConfirmedTrueYDeletedFalse()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        userManager.FindByEmailAsync("nuevo@email.com").Returns((ApplicationUser?)null);
+        userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>(Array.Empty<ApplicationUser>()));
+
+        ApplicationUser? creado = null;
+        userManager.CreateAsync(Arg.Do<ApplicationUser>(u => creado = u))
+            .Returns(IdentityResult.Failed());
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("nuevo@email.com", 40123456, "  Ana  ", "  Gómez  ")));
+
+        Assert.NotNull(creado);
+        Assert.True(creado!.EmailConfirmed);
+        Assert.False(creado.Deleted);
+        Assert.Equal(40123456, creado.Dni);
+        Assert.Equal("Ana", creado.FirstName);
+        Assert.Equal("Gómez", creado.LastName);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationService()
+    {
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        var signInService = Substitute.For<ISignInService>();
+        var roleManager = Substitute.For<RoleManager<IdentityRole>>(
+            Substitute.For<IRoleStore<IdentityRole>>(), null, null, null, null);
+        var logger = new TestLogger<AuthenticationService>();
+
+        var service = new AuthenticationService(userManager, signInService, roleManager, null!, logger);
+        return (service, userManager, logger);
+    }
+
+    private sealed class TestLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(state, exception)));
+        }
     }
     private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
     {
