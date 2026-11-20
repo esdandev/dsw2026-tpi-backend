@@ -162,4 +162,13 @@
   <data name="AUTHORIZATION_FAILED" xml:space="preserve">
     <value>Se requieren permisos para la operación solicitada</value>
   </data>
+	<data name="DOCTOR_INACTIVE" xml:space="preserve">
+    <value>No se pueden reservar turnos con un médico inactivo</value>
+  </data>
+	<data name="AVAILABILITY_OVERLAP" xml:space="preserve">
+    <value>La regla de disponibilidad solapa con una regla existente</value>
+  </data>
+	<data name="RATE_LIMIT_EXCEEDED" xml:space="preserve">
+    <value>Se excedió el límite de solicitudes permitido</value>
+  </data>
 </root>

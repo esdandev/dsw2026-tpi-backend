@@ -18,12 +18,20 @@ public class AppointmentController : AppController
     private readonly IValidator<AppointmentModel.CreateRequest> _createValidator;
     private readonly IValidator<AppointmentModel.GetByDateQuery> _getByDateValidator;
     private readonly IValidator<AppointmentModel.SearchQuery> _searchValidator;
-    public AppointmentController(IAppointmentService service, IValidator<AppointmentModel.CreateRequest> createValidator, IValidator<AppointmentModel.GetByDateQuery> getByDateValidator, IValidator<AppointmentModel.SearchQuery> searchValidator)
+    private readonly IValidator<AppointmentModel.GetByPatientQuery> _getByPatientValidator;
+
+    public AppointmentController(
+        IAppointmentService service,
+        IValidator<AppointmentModel.CreateRequest> createValidator,
+        IValidator<AppointmentModel.GetByDateQuery> getByDateValidator,
+        IValidator<AppointmentModel.SearchQuery> searchValidator,
+        IValidator<AppointmentModel.GetByPatientQuery> getByPatientValidator)
     {
         _service = service;
         _createValidator = createValidator;
         _getByDateValidator = getByDateValidator;
         _searchValidator = searchValidator;
+        _getByPatientValidator = getByPatientValidator;
     }
 
     [HttpGet]
@@ -72,11 +80,17 @@ public class AppointmentController : AppController
     [HttpGet("patient")]
     [Authorize(Policy = Dsw2026Tpi.CrossCutting.Identity.Policies.PatientPolicy)]
     [ProducesResponseType(typeof(IEnumerable<AppointmentModel.PatientResponse>), StatusCodes.Status200OK)]
-    public async Task<IActionResult> GetByPatient([FromQuery] long dni)
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<IActionResult> GetByPatient([FromQuery] long? dni)
     {
         var authenticatedUserName = GetAuthenticatedUserName();
 
-        var appointments = await _service.GetByPatient(dni, authenticatedUserName);
+        var query = new AppointmentModel.GetByPatientQuery(dni);
+        var validation = await _getByPatientValidator.ValidateAsync(query);
+        Invalidez(validation);
+
+        var appointments = await _service.GetByPatient(dni!.Value, authenticatedUserName);
         return Ok(appointments);
     }
 

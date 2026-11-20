@@ -26,4 +26,5 @@ public static class AppointmentModel
     public record GetByDateQuery(string Date, int PageSize, int PageIndex);
     public record SearchQuery(Guid? SpecialtyId, Guid? DoctorId, long? Dni, string? Date, int PageSize, int PageIndex);
     public record PatientResponse(Guid Id, Guid DoctorId, string DoctorName, string Reason, string Status, DateTime StartTime, DateTime EndTime);
+    public record GetByPatientQuery(long? Dni);
 }

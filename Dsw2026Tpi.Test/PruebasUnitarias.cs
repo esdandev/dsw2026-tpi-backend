@@ -21,6 +21,9 @@ using System.Security.Claims;
 using Xunit;
 using Dsw2026Tpi.Application.Interfaces;
 using Microsoft.EntityFrameworkCore.Query;
+using Dsw2026Tpi.CrossCutting.Identity;
+using System.Text.Json;
+using Dsw2026Tpi.CrossCutting.Resources;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -710,7 +713,8 @@ public class PruebasUnitarias
                 service,
                 new AppointmentCreateRequestValidator(),
                 new AppointmentGetByDateQueryValidator(),
-                new AppointmentSearchQueryValidator())
+                new AppointmentSearchQueryValidator(),
+                new AppointmentGetByPatientQueryValidator())
             {
                 ControllerContext = new ControllerContext { HttpContext = httpContext }
             };
@@ -931,7 +935,332 @@ public class PruebasUnitarias
         var objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status201Created, objectResult.StatusCode);
     }
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData(0L, false)]
+    [InlineData(123456L, false)]
+    [InlineData(1234567L, true)]
+    [InlineData(12345678L, true)]
+    [InlineData(123456789L, false)]
+    public void AppointmentGetByPatientQueryValidator_ValidaDniObligatorioYEntre7Y8Digitos(long? dni, bool valido)
+    {
+        var validator = new AppointmentGetByPatientQueryValidator();
+        var result = validator.Validate(new AppointmentModel.GetByPatientQuery(dni));
 
+        Assert.Equal(valido, result.IsValid);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(123L)]
+    [InlineData(123456789L)]
+    public async Task AppointmentController_GetByPatient_CuandoDniFaltaOEsInvalido_LanzaValidationExceptionYNoLlamaAlServicio(long? dni)
+    {
+        var service = Substitute.For<IAppointmentService>();
+        var httpContext = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                [new Claim(ClaimTypes.Name, "paciente@email.com")], "TestAuth"))
+        };
+        var controller = new AppointmentController(
+            service,
+            new AppointmentCreateRequestValidator(),
+            new AppointmentGetByDateQueryValidator(),
+            new AppointmentSearchQueryValidator(),
+            new AppointmentGetByPatientQueryValidator())
+        {
+            ControllerContext = new ControllerContext { HttpContext = httpContext }
+        };
+
+        await Assert.ThrowsAsync<ValidationException>(() => controller.GetByPatient(dni));
+
+        await service.DidNotReceive().GetByPatient(Arg.Any<long>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task AppointmentService_GetByPatient_CuandoDniNoCoincideConUsuarioAutenticado_LanzaAuthenticationException()
+    {
+        var patient = new ApplicationUser { Id = "p1", UserName = "paciente@email.com", Dni = 40123456 };
+        _userManager.FindByNameAsync("paciente@email.com").Returns(patient);
+
+        var act = () => _appointmentTest.GetByPatient(40999999, "paciente@email.com");
+
+        await Assert.ThrowsAsync<AuthenticationException>(act);
+    }
+
+    [Fact]
+    public async Task AppointmentService_GetByPatient_DevuelveSoloTurnosBookedActivosSinPaginar()
+    {
+        var patient = new ApplicationUser { Id = "p1", UserName = "paciente@email.com", Dni = 40123456 };
+        var doctor = CrearDoctor();
+        var slotFuturo = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.Now.AddDays(1),
+            End = Clock.Now.AddDays(1).AddMinutes(30),
+            Status = SlotStatus.BOOKED
+        };
+        var slotPasado = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Doctor = doctor,
+            Start = Clock.Now.AddMinutes(-30),
+            End = Clock.Now,
+            Status = SlotStatus.BOOKED
+        };
+
+        var turnoActivo = new Appointment(slotFuturo, patient.Id, "Control de rutina");
+        var turnoCancelado = new Appointment(slotFuturo, patient.Id, "Cancelado");
+        turnoCancelado.Cancel();
+        var turnoAtendido = new Appointment(slotFuturo, patient.Id, "Atendido");
+        turnoAtendido.MarkAttended();
+        var turnoPasado = new Appointment(slotPasado, patient.Id, "Turno viejo");
+        var turnoOtroPaciente = new Appointment(slotFuturo, "otro-paciente", "Otro");
+
+        _userManager.FindByNameAsync("paciente@email.com").Returns(patient);
+
+        Expression<Func<Appointment, bool>>? filtroCapturado = null;
+        _persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(),
+                Arg.Any<string[]>())
+            .Returns(call =>
+            {
+                filtroCapturado = call.Arg<Expression<Func<Appointment, bool>>>();
+                return Task.FromResult<IEnumerable<Appointment>?>(new[] { turnoActivo });
+            });
+
+        var result = (await _appointmentTest.GetByPatient(patient.Dni, "paciente@email.com")).ToList();
+
+        var item = Assert.Single(result);
+        Assert.Equal(turnoActivo.Id, item.Id);
+        Assert.Equal("BOOKED", item.Status);
+
+        var predicate = filtroCapturado!.Compile();
+        Assert.True(predicate(turnoActivo));
+        Assert.False(predicate(turnoCancelado));
+        Assert.False(predicate(turnoAtendido));
+        Assert.False(predicate(turnoPasado));
+        Assert.False(predicate(turnoOtroPaciente));
+    }
+    [Fact]
+    public async Task LoginPatient_CuandoUsuarioEstaEliminado_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = true
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40123456)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoEmailNoEstaConfirmado_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = false,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40123456)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoEmailExisteConOtroDni_LanzaAuthenticationExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var user = new ApplicationUser
+        {
+            UserName = "paciente@email.com",
+            Email = "paciente@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("paciente@email.com").Returns(user);
+
+        var ex = await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("paciente@email.com", 40999999)));
+
+        Assert.Equal("AUTHENTICATION_FAILED", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40999999", log.Message);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoDniPerteneceAOtroEmail_LanzaConflictExceptionYLogueaWarningSinDniCompleto()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var otroPaciente = new ApplicationUser
+        {
+            UserName = "otro@email.com",
+            Email = "otro@email.com",
+            Dni = 40123456,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("nuevo@email.com").Returns((ApplicationUser?)null);
+        userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>([otroPaciente]));
+
+        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("nuevo@email.com", 40123456)));
+
+        Assert.Equal("PATIENT_DNI_CONFLICT", ex.Error.ErrorCode);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+        await userManager.DidNotReceive().CreateAsync(Arg.Any<ApplicationUser>());
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoUsuarioNoTieneRolPaciente_LanzaAuthenticationExceptionYNoActualizaNombre()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        var admin = new ApplicationUser
+        {
+            UserName = "admin@email.com",
+            Email = "admin@email.com",
+            Dni = 99999999,
+            EmailConfirmed = true,
+            Deleted = false
+        };
+        userManager.FindByEmailAsync("admin@email.com").Returns(admin);
+        userManager.IsInRoleAsync(admin, Roles.Patient).Returns(false);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("admin@email.com", 99999999, "Nombre", "Nuevo")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("99999999", log.Message);
+        await userManager.DidNotReceive().UpdateAsync(Arg.Any<ApplicationUser>());
+    }
+
+    [Fact]
+    public async Task LoginPatient_CuandoAutoRegistra_SeteaEmailConfirmedTrueYDeletedFalse()
+    {
+        var (service, userManager, logger) = CrearAuthenticationService();
+        userManager.FindByEmailAsync("nuevo@email.com").Returns((ApplicationUser?)null);
+        userManager.Users.Returns(new TestAsyncEnumerable<ApplicationUser>(Array.Empty<ApplicationUser>()));
+
+        ApplicationUser? creado = null;
+        userManager.CreateAsync(Arg.Do<ApplicationUser>(u => creado = u))
+            .Returns(IdentityResult.Failed());
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginPatient(new LoginPatientModel.Request("nuevo@email.com", 40123456, "  Ana  ", "  Gómez  ")));
+
+        Assert.NotNull(creado);
+        Assert.True(creado!.EmailConfirmed);
+        Assert.False(creado.Deleted);
+        Assert.Equal(40123456, creado.Dni);
+        Assert.Equal("Ana", creado.FirstName);
+        Assert.Equal("Gómez", creado.LastName);
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("40123456", log.Message);
+    }
+    [Fact]
+    public void ErrorCodes_ContieneLosCodigosUnificadosEnResx()
+    {
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.DOCTOR_INACTIVE));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.AVAILABILITY_OVERLAP));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.RATE_LIMIT_EXCEEDED));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.DOCTOR_LICENSE_CONFLICT));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.PATIENT_DNI_CONFLICT));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.UNHANDLED_ERROR));
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreErrorNoControlado_Devuelve500ConFormatoUnificado()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Detalle interno sensible"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        Assert.Equal("application/json", httpContext.Response.ContentType);
+
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        var body = await reader.ReadToEndAsync();
+
+        Assert.DoesNotContain("Detalle interno sensible", body);
+
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        Assert.Equal(nameof(ErrorCodes.UNHANDLED_ERROR), root.GetProperty("errorCode").GetString());
+        Assert.Equal(ErrorCodes.UNHANDLED_ERROR, root.GetProperty("message").GetString());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
+        Assert.Equal(0, root.GetProperty("details").GetArrayLength());
+    }
+    private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
+        CrearAuthenticationService()
+    {
+        var userManager = Substitute.For<UserManager<ApplicationUser>>(
+            Substitute.For<IUserStore<ApplicationUser>>(), null, null, null, null, null, null, null, null);
+        var signInService = Substitute.For<ISignInService>();
+        var roleManager = Substitute.For<RoleManager<IdentityRole>>(
+            Substitute.For<IRoleStore<IdentityRole>>(), null, null, null, null);
+        var logger = new TestLogger<AuthenticationService>();
+
+        var service = new AuthenticationService(userManager, signInService, roleManager, null!, logger);
+        return (service, userManager, logger);
+    }
+
+    private sealed class TestLogger<T> : ILogger<T>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Add((logLevel, formatter(state, exception)));
+        }
+    }
     private sealed class TestAsyncEnumerable<T> : EnumerableQuery<T>, IAsyncEnumerable<T>, IQueryable<T>
     {
         public TestAsyncEnumerable(IEnumerable<T> enumerable) : base(enumerable) { }

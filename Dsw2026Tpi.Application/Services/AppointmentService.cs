@@ -32,7 +32,7 @@ public class AppointmentService : IAppointmentService
             throw new EntityNotFoundException("Doctor");
 
         if (!doctor.IsActive)
-            throw new BusinessRuleException("DOCTOR_INACTIVE", "No se pueden reservar turnos con un médico inactivo.");
+            throw new BusinessRuleException(nameof(ErrorCodes.DOCTOR_INACTIVE), ErrorCodes.DOCTOR_INACTIVE);
 
         var slot = await _persistence.GetById<AvailabilitySlot>(request.AvailabilitySlotId);
         if (slot is null || slot.DoctorId != request.DoctorId)

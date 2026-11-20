@@ -25,6 +25,7 @@ public class AuthenticationController : AppController
     [EnableRateLimiting(RateLimitPolicies.AdminLogin)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> Login([FromBody] LoginAdminModel.Request request)
     {
         var validation = await _loginAdminValidator.ValidateAsync(request);
@@ -38,6 +39,7 @@ public class AuthenticationController : AppController
     [EnableRateLimiting(RateLimitPolicies.PatientLogin)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> LoginPatient([FromBody] LoginPatientModel.Request request)
     {
