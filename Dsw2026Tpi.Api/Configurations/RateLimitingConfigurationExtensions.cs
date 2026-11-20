@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.RateLimiting;
 using System.Text.Json;
 using System.Threading.RateLimiting;
+using Dsw2026Tpi.CrossCutting.Resources;
 
 namespace Dsw2026Tpi.Api.Configurations;
 public static class RateLimitPolicies
@@ -37,7 +38,7 @@ public static class RateLimitingConfigurationExtensions
 
                 logger.LogWarning("Solicitud rechazada por rate limiting. " + "Usuario: {UserName}; IP: {IpAddress}; " + "Método: {Method}; Ruta: {Path}", userName, ipAddress, httpContext.Request.Method, httpContext.Request.Path);
 
-                var error = new ErrorResponse("RATE_LIMIT_EXCEEDED", "Se excedió el límite de solicitudes permitido.");
+                var error = new ErrorResponse(nameof(ErrorCodes.RATE_LIMIT_EXCEEDED), ErrorCodes.RATE_LIMIT_EXCEEDED);
 
                 var json = JsonSerializer.Serialize(error, AppJsonOptions.Default);
 

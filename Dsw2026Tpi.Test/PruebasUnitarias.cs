@@ -22,6 +22,8 @@ using Xunit;
 using Dsw2026Tpi.Application.Interfaces;
 using Microsoft.EntityFrameworkCore.Query;
 using Dsw2026Tpi.CrossCutting.Identity;
+using System.Text.Json;
+using Dsw2026Tpi.CrossCutting.Resources;
 
 namespace Dsw2026Tpi.Test.Services;
 
@@ -1186,7 +1188,48 @@ public class PruebasUnitarias
         Assert.Equal(LogLevel.Warning, log.Level);
         Assert.DoesNotContain("40123456", log.Message);
     }
+    [Fact]
+    public void ErrorCodes_ContieneLosCodigosUnificadosEnResx()
+    {
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.DOCTOR_INACTIVE));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.AVAILABILITY_OVERLAP));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.RATE_LIMIT_EXCEEDED));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.DOCTOR_LICENSE_CONFLICT));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.PATIENT_DNI_CONFLICT));
+        Assert.False(string.IsNullOrWhiteSpace(ErrorCodes.UNHANDLED_ERROR));
+    }
 
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreErrorNoControlado_Devuelve500ConFormatoUnificado()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Detalle interno sensible"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+        Assert.Equal("application/json", httpContext.Response.ContentType);
+
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        var body = await reader.ReadToEndAsync();
+
+        Assert.DoesNotContain("Detalle interno sensible", body);
+
+        using var json = JsonDocument.Parse(body);
+        var root = json.RootElement;
+        Assert.Equal(nameof(ErrorCodes.UNHANDLED_ERROR), root.GetProperty("errorCode").GetString());
+        Assert.Equal(ErrorCodes.UNHANDLED_ERROR, root.GetProperty("message").GetString());
+        Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
+        Assert.Equal(0, root.GetProperty("details").GetArrayLength());
+    }
     private static (AuthenticationService Service, UserManager<ApplicationUser> UserManager, TestLogger<AuthenticationService> Logger)
         CrearAuthenticationService()
     {

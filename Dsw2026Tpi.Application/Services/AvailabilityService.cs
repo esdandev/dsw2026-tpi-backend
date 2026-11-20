@@ -5,6 +5,7 @@ using Dsw2026Tpi.CrossCutting.Exceptions;
 using Dsw2026Tpi.CrossCutting.Helpers;
 using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
+using Dsw2026Tpi.CrossCutting.Resources;
 
 namespace Dsw2026Tpi.Application.Services;
 
@@ -181,7 +182,7 @@ public class AvailabilityService : IAvailabilityService
                 if (!existingDays.Contains(day)) continue;
 
                 if (er.StartTime < end && er.EndTime > start)
-                    throw new BusinessRuleException("AVAILABILITY_OVERLAP", "La regla de disponibilidad solapa con una regla existente.");
+                    throw new BusinessRuleException(nameof(ErrorCodes.AVAILABILITY_OVERLAP), ErrorCodes.AVAILABILITY_OVERLAP);
             }
         }
 

@@ -6,6 +6,7 @@ using Dsw2026Tpi.Data.Identity;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.EntityFrameworkCore;
+using Dsw2026Tpi.CrossCutting.Resources;
 
 namespace Dsw2026Tpi.Application.Services;
 
@@ -65,7 +66,7 @@ public class AuthenticationService : IAuthenticationService
                     "Intento de login de paciente con DNI asociado a otro email. Email: {Email}, Dni: {MaskedDni}",
                     request.Email,
                     MaskDni(request.Dni));
-                throw new ConflictException("PATIENT_DNI_CONFLICT", "El DNI ya se encuentra registrado con otro correo electrónico.");
+                throw new ConflictException(nameof(ErrorCodes.PATIENT_DNI_CONFLICT), ErrorCodes.PATIENT_DNI_CONFLICT);
             }
 
             var now = DateTime.UtcNow;

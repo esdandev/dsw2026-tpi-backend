@@ -97,6 +97,15 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
+        ///   Busca una cadena traducida similar a La regla de disponibilidad solapa con una regla existente.
+        /// </summary>
+        public static string AVAILABILITY_OVERLAP {
+            get {
+                return ResourceManager.GetString("AVAILABILITY_OVERLAP", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Busca una cadena traducida similar a Ya existe un turno para el médico en ese horario.
         /// </summary>
         public static string AVAILABILITY_SLOT_CONFLICT {
@@ -111,6 +120,24 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         public static string DATA_INTEGRITY_CONFLICT {
             get {
                 return ResourceManager.GetString("DATA_INTEGRITY_CONFLICT", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Busca una cadena traducida similar a No se pueden reservar turnos con un médico inactivo.
+        /// </summary>
+        public static string DOCTOR_INACTIVE {
+            get {
+                return ResourceManager.GetString("DOCTOR_INACTIVE", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Busca una cadena traducida similar a Ya existe un médico con ese número de matrícula.
+        /// </summary>
+        public static string DOCTOR_LICENSE_CONFLICT {
+            get {
+                return ResourceManager.GetString("DOCTOR_LICENSE_CONFLICT", resourceCulture);
             }
         }
         
@@ -133,6 +160,15 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
+        ///   Busca una cadena traducida similar a Se excedió el límite de solicitudes permitido.
+        /// </summary>
+        public static string RATE_LIMIT_EXCEEDED {
+            get {
+                return ResourceManager.GetString("RATE_LIMIT_EXCEEDED", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Busca una cadena traducida similar a Se produjo un error al registrar el usuario.
         /// </summary>
         public static string REGISTER_USER_CONFLICT {
@@ -151,15 +187,6 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
-        ///   Busca una cadena traducida similar a Ya existe una especialidad con ese nombre.
-        /// </summary>
-        public static string SPECIALITY_NAME_CONFLICT {
-            get {
-                return ResourceManager.GetString("SPECIALITY_NAME_CONFLICT", resourceCulture);
-            }
-        }
-        
-        /// <summary>
         ///   Busca una cadena traducida similar a No se puede eliminar una especialidad con médicos activos.
         /// </summary>
         public static string SPECIALITY_IN_USE {
@@ -169,11 +196,11 @@ namespace Dsw2026Tpi.CrossCutting.Resources {
         }
         
         /// <summary>
-        ///   Busca una cadena traducida similar a Ya existe un médico con ese número de matrícula.
+        ///   Busca una cadena traducida similar a Ya existe una especialidad con ese nombre.
         /// </summary>
-        public static string DOCTOR_LICENSE_CONFLICT {
+        public static string SPECIALITY_NAME_CONFLICT {
             get {
-                return ResourceManager.GetString("DOCTOR_LICENSE_CONFLICT", resourceCulture);
+                return ResourceManager.GetString("SPECIALITY_NAME_CONFLICT", resourceCulture);
             }
         }
         
