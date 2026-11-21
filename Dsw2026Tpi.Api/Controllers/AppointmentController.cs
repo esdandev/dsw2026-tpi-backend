@@ -2,6 +2,7 @@
 using Dsw2026Tpi.Application.Dtos;
 using Dsw2026Tpi.Application.Interfaces;
 using Dsw2026Tpi.CrossCutting.Exceptions;
+using Dsw2026Tpi.Domain.Entities;
 using FluentValidation;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -19,19 +20,22 @@ public class AppointmentController : AppController
     private readonly IValidator<AppointmentModel.GetByDateQuery> _getByDateValidator;
     private readonly IValidator<AppointmentModel.SearchQuery> _searchValidator;
     private readonly IValidator<AppointmentModel.GetByPatientQuery> _getByPatientValidator;
+    private readonly IValidator<AppointmentModel.UpdateStatusRequest> _updateStatusValidator;
 
     public AppointmentController(
         IAppointmentService service,
         IValidator<AppointmentModel.CreateRequest> createValidator,
         IValidator<AppointmentModel.GetByDateQuery> getByDateValidator,
         IValidator<AppointmentModel.SearchQuery> searchValidator,
-        IValidator<AppointmentModel.GetByPatientQuery> getByPatientValidator)
+        IValidator<AppointmentModel.GetByPatientQuery> getByPatientValidator,
+        IValidator<AppointmentModel.UpdateStatusRequest> updateStatusValidator)
     {
         _service = service;
         _createValidator = createValidator;
         _getByDateValidator = getByDateValidator;
         _searchValidator = searchValidator;
         _getByPatientValidator = getByPatientValidator;
+        _updateStatusValidator = updateStatusValidator;
     }
 
     [HttpGet]
@@ -111,6 +115,23 @@ public class AppointmentController : AppController
 
         var appointment = await _service.Create(request, authenticatedUserName);
         return StatusCode(StatusCodes.Status201Created, appointment);
+    }
+
+    [HttpPut("{id:guid}/status")]
+    [Authorize(Policy = Dsw2026Tpi.CrossCutting.Identity.Policies.AdminPolicy)]
+    [ProducesResponseType(typeof(AppointmentModel.UpdateStatusResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] AppointmentModel.UpdateStatusRequest request)
+    {
+        var validation = await _updateStatusValidator.ValidateAsync(request);
+        Invalidez(validation);
+
+        var status = Enum.Parse<AppointmentStatus>(request.Status.ToUpperInvariant());
+
+        var result = await _service.UpdateStatus(id, status);
+        return Ok(result);
     }
 
     [HttpDelete("{id}")]

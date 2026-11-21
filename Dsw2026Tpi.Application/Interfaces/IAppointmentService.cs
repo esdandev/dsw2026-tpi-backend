@@ -9,5 +9,6 @@ public interface IAppointmentService
     Task<AppointmentModel.CreateResponse> Create(AppointmentModel.CreateRequest request, string authenticatedUserName);
     Task<Pagination<AppointmentModel.SearchAdministrativeResponse>> Search(Guid? specialtyId, Guid? doctorId, long? dni, DateOnly? date, int pageSize, int pageIndex);
     Task Cancel(Guid id, string authenticatedUserName);
+    Task<AppointmentModel.UpdateStatusResponse> UpdateStatus(Guid id, AppointmentStatus status);
     Task<IEnumerable<AppointmentModel.PatientResponse>> GetByPatient(long dni, string authenticatedUserName);
 }

@@ -120,6 +120,32 @@ public class AppointmentService : IAppointmentService
         _logger.LogInformation("Turno cancelado. AppointmentId: {AppointmentId}; DoctorId: {DoctorId}; InicioUtc: {Start:O}",
             appointment.Id, appointment.AvailabilitySlot?.DoctorId, appointment.AvailabilitySlot?.Start);
     }
+
+    public async Task<AppointmentModel.UpdateStatusResponse> UpdateStatus(Guid id, AppointmentStatus status)
+    {
+        var appointment = await _persistence.GetById<Appointment>(id, nameof(Appointment.AvailabilitySlot));
+
+        if (appointment is null)
+            throw new EntityNotFoundException("Appointment");
+
+        if (appointment.Status != AppointmentStatus.BOOKED)
+            throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "Solo se pueden actualizar turnos reservados");
+
+        if (appointment.AvailabilitySlot is null || appointment.AvailabilitySlot.Start > Clock.Now)
+            throw new ConflictException(nameof(ErrorCodes.APPOINTMENT_CONFLICT), "No se puede marcar un turno que todavía no comenzó");
+
+        if (status == AppointmentStatus.ATTENDED)
+            appointment.MarkAttended();
+        else
+            appointment.MarkNoShow();
+
+        await _persistence.Update(appointment);
+
+        _logger.LogInformation("Turno marcado como {Status}. AppointmentId: {AppointmentId}", status, appointment.Id);
+
+        return new AppointmentModel.UpdateStatusResponse(appointment.Id, appointment.Status.ToString());
+    }
+
     public async Task<IEnumerable<AppointmentModel.PatientResponse>> GetByPatient(long dni, string authenticatedUserName)
     {
         var patient = await GetAuthenticatedPatient(authenticatedUserName, dni);

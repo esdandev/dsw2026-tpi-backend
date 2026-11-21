@@ -104,6 +104,7 @@ Las solicitudes rechazadas devuelven `429 Too Many Requests` con el formato de e
 ### Turnos (`/api/appointments`)
 - `POST /api/appointments` — reserva un turno (paciente). Body: `{ "doctorId", "availabilitySlotId", "patient": { "dni" }, "reason" }`, con `availabilitySlotId` tomado de `GET /api/doctors/{id}/slots`.
 - `DELETE /api/appointments/{id}` — cancela un turno propio (paciente). Solo si está `BOOKED` y el horario no comenzó; en caso contrario `409 APPOINTMENT_CONFLICT`.
+- `PUT /api/appointments/{id}/status` — marca un turno como `ATTENDED` o `NO_SHOW` (admin). Body: `{ "status": "ATTENDED" }`. Solo turnos `BOOKED` que ya comenzaron; en caso contrario `409 APPOINTMENT_CONFLICT`.
 - `GET /api/appointments/patient?dni=` — turnos activos y futuros del paciente autenticado. `401` si el DNI no coincide con el token.
 - `GET /api/appointments?date=` — turnos de un día (admin), con `pageSize` y `pageIndex`.
 - `GET /api/appointments/search?...` — búsqueda combinada por especialidad, médico, dni y fecha (admin), con `pageSize` y `pageIndex`.
