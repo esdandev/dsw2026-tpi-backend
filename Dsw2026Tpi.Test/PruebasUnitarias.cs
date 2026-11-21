@@ -1608,6 +1608,42 @@ public class PruebasUnitarias
     }
 
     [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreUnErrorDesconocido_LogueaErrorConExcepcionYNingunWarning()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Falla inesperada"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        using var json = JsonDocument.Parse(await reader.ReadToEndAsync());
+        Assert.Equal(nameof(ErrorCodes.UNHANDLED_ERROR), json.RootElement.GetProperty("errorCode").GetString());
+
+        logger.Received(1).Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+        logger.DidNotReceive().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
     public void JwtService_GenerateToken_IncluyeClaimJtiUnicoPorToken()
     {
         var configuration = new ConfigurationBuilder()
