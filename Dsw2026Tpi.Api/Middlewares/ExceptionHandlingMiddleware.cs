@@ -29,28 +29,20 @@ public class ExceptionHandlingMiddleware
         }
         catch (Exception exception)
         {
-            if (exception is DbUpdateConcurrencyException)
-            {
-                _logger.LogWarning(exception, "Se rechazó una operación por conflicto de concurrencia");
-            }
-            else if (exception is DbUpdateException dbException && IsUniqueConstraintViolation(dbException))
-            {
-                _logger.LogWarning(exception, "Se rechazó una operación por violación de una restricción única");
-            }
-            else
-            {
-                _logger.LogError(exception, "Se produjo un error durante el procesamiento de la solicitud");
-            }
+            var statusCode = ResolveStatusCode(exception);
+            var error = ResolveError(exception);
 
-            await HandleExceptionAsync(context, exception);
+            if (statusCode == HttpStatusCode.InternalServerError)
+                _logger.LogError(exception, "Se produjo un error durante el procesamiento de la solicitud ({ErrorCode})", error.ErrorCode);
+            else
+                _logger.LogWarning("Se rechazó la solicitud con el código {StatusCode} ({ErrorCode})", (int)statusCode, error.ErrorCode);
+
+            await HandleExceptionAsync(context, statusCode, error);
         }
     }
 
-    private static async Task HandleExceptionAsync(HttpContext context, Exception exception)
+    private static async Task HandleExceptionAsync(HttpContext context, HttpStatusCode statusCode, ErrorResponse error)
     {
-        var statusCode = ResolveStatusCode(exception);
-        var error = ResolveError(exception);
-
         var result = JsonSerializer.Serialize(error, AppJsonOptions.Default);
 
         context.Response.ContentType = "application/json";

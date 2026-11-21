@@ -1538,6 +1538,37 @@ public class PruebasUnitarias
         Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
         Assert.Equal(0, root.GetProperty("details").GetArrayLength());
     }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreUnaExcepcionDeNegocio_LogueaWarningSinStackYDevuelveElCodigoHttp()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new Dsw2026Tpi.CrossCutting.Exceptions.AuthenticationException(),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status401Unauthorized, httpContext.Response.StatusCode);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            null,
+            Arg.Any<Func<object, Exception?, string>>());
+        logger.DidNotReceive().Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
     [Fact]
     public void JwtService_GenerateToken_IncluyeClaimJtiUnicoPorToken()
     {

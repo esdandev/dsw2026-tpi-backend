@@ -57,8 +57,8 @@ public class Program
 
             app.UseAppForwardedHeaders(builder.Configuration);
             app.UseMiddleware<SecurityHeadersMiddleware>();
-            app.UseMiddleware<ExceptionHandlingMiddleware>();
             app.UseSerilogRequestLogging();
+            app.UseMiddleware<ExceptionHandlingMiddleware>();
 
             if (app.Environment.IsProduction())
             {
