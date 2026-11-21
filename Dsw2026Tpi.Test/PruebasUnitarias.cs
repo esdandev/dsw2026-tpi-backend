@@ -12,9 +12,11 @@ using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
@@ -903,6 +905,43 @@ public class PruebasUnitarias
 
         // Assert
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoLaRespuestaYaEmpezo_NoReescribeNiLanza()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        var body = new MemoryStream();
+        var responseFeature = Substitute.For<IHttpResponseFeature>();
+        responseFeature.HasStarted.Returns(true);
+        responseFeature.StatusCode.Returns(StatusCodes.Status200OK);
+        responseFeature.Body.Returns(body);
+        responseFeature.Headers.Returns(new HeaderDictionary());
+        httpContext.Features.Set(responseFeature);
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Fallo a mitad de la respuesta"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status200OK, httpContext.Response.StatusCode);
+        Assert.Equal(0, body.Length);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
     }
 
        [Fact]
@@ -1538,6 +1577,89 @@ public class PruebasUnitarias
         Assert.Equal(JsonValueKind.Array, root.GetProperty("details").ValueKind);
         Assert.Equal(0, root.GetProperty("details").GetArrayLength());
     }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreUnaExcepcionDeNegocio_LogueaWarningSinStackYDevuelveElCodigoHttp()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new Dsw2026Tpi.CrossCutting.Exceptions.AuthenticationException(),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status401Unauthorized, httpContext.Response.StatusCode);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            null,
+            Arg.Any<Func<object, Exception?, string>>());
+        logger.DidNotReceive().Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoOcurreUnErrorDesconocido_LogueaErrorConExcepcionYNingunWarning()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        httpContext.Response.Body = new MemoryStream();
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Falla inesperada"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status500InternalServerError, httpContext.Response.StatusCode);
+
+        httpContext.Response.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Response.Body);
+        using var json = JsonDocument.Parse(await reader.ReadToEndAsync());
+        Assert.Equal(nameof(ErrorCodes.UNHANDLED_ERROR), json.RootElement.GetProperty("errorCode").GetString());
+
+        logger.Received(1).Log(
+            LogLevel.Error,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+        logger.DidNotReceive().Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception?>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public void ModelStateErrors_TraduceElBindingAElContratoDeErrores()
+    {
+        var modelState = new ModelStateDictionary();
+        modelState.AddModelError("Days", "The Days field is required.");
+        modelState.AddModelError("Filter.PageSize", "The value 'abc' is not valid for PageSize.");
+        modelState.AddModelError("$", "'e' is an invalid start of a property name. Expected a '\"'.");
+
+        var error = ModelStateErrors.From(modelState);
+
+        Assert.Equal(nameof(ErrorCodes.VALIDATION_ERROR), error.ErrorCode);
+        Assert.Contains(error.Details, detail => detail.Field == "days" && detail.Issue == "es obligatorio");
+        Assert.Contains(error.Details, detail => detail.Field == "filter.pageSize" && detail.Issue == "formato inválido");
+        Assert.Contains(error.Details, detail => detail.Field == "request" && detail.Issue == "valor inválido");
+    }
+
     [Fact]
     public void JwtService_GenerateToken_IncluyeClaimJtiUnicoPorToken()
     {
@@ -1702,7 +1824,25 @@ public class PruebasUnitarias
         var log = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, log.Level);
         Assert.DoesNotContain("Admin123!", log.Message);
+        Assert.DoesNotContain("admin@utn.com", log.Message);
+        Assert.Contains("a***@utn.com", log.Message);
         await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoElEmailTraeSaltoDeLinea_NoLoEscribeEnElLog()
+    {
+        var (service, userManager, _, logger) = CrearAuthenticationServiceConSignIn();
+        userManager.FindByEmailAsync("admin@utn.com\r\nINYECTADO").Returns((ApplicationUser?)null);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com\r\nINYECTADO", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("admin@utn.com", log.Message);
+        Assert.DoesNotContain("\n", log.Message);
+        Assert.DoesNotContain("\r", log.Message);
     }
 
     [Fact]
