@@ -12,6 +12,7 @@ using Dsw2026Tpi.Domain.Entities;
 using Dsw2026Tpi.Domain.Interfaces;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -903,6 +904,37 @@ public class PruebasUnitarias
 
         // Assert
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public async Task ExceptionHandlingMiddleware_CuandoLaRespuestaYaEmpezo_NoReescribeNiLanza()
+    {
+        // Arrange
+        var httpContext = new DefaultHttpContext();
+        var body = new MemoryStream();
+        var responseFeature = Substitute.For<IHttpResponseFeature>();
+        responseFeature.HasStarted.Returns(true);
+        responseFeature.StatusCode.Returns(StatusCodes.Status200OK);
+        responseFeature.Body.Returns(body);
+        responseFeature.Headers.Returns(new HeaderDictionary());
+        httpContext.Features.Set(responseFeature);
+        var logger = Substitute.For<ILogger<ExceptionHandlingMiddleware>>();
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw new InvalidOperationException("Fallo a mitad de la respuesta"),
+            logger);
+
+        // Act
+        await middleware.InvokeAsync(httpContext);
+
+        // Assert
+        Assert.Equal(StatusCodes.Status200OK, httpContext.Response.StatusCode);
+        Assert.Equal(0, body.Length);
         logger.Received(1).Log(
             LogLevel.Warning,
             Arg.Any<EventId>(),

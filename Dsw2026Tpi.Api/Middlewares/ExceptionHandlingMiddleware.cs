@@ -32,6 +32,13 @@ public class ExceptionHandlingMiddleware
             var statusCode = ResolveStatusCode(exception);
             var error = ResolveError(exception);
 
+            // Asignar status o cuerpo con la respuesta ya iniciada lanzaria InvalidOperationException y cortaria la conexion.
+            if (context.Response.HasStarted)
+            {
+                _logger.LogWarning(exception, "La respuesta ya se había iniciado; no se reescribe el error {ErrorCode}", error.ErrorCode);
+                return;
+            }
+
             if (statusCode == HttpStatusCode.InternalServerError)
                 _logger.LogError(exception, "Se produjo un error durante el procesamiento de la solicitud ({ErrorCode})", error.ErrorCode);
             else if (exception is DbUpdateConcurrencyException)
