@@ -34,6 +34,10 @@ public class ExceptionHandlingMiddleware
 
             if (statusCode == HttpStatusCode.InternalServerError)
                 _logger.LogError(exception, "Se produjo un error durante el procesamiento de la solicitud ({ErrorCode})", error.ErrorCode);
+            else if (exception is DbUpdateConcurrencyException)
+                _logger.LogWarning(exception, "Se rechazó una operación por conflicto de concurrencia ({ErrorCode})", error.ErrorCode);
+            else if (exception is DbUpdateException dbException && IsUniqueConstraintViolation(dbException))
+                _logger.LogWarning(exception, "Se rechazó una operación por violación de una restricción única ({ErrorCode})", error.ErrorCode);
             else
                 _logger.LogWarning("Se rechazó la solicitud con el código {StatusCode} ({ErrorCode})", (int)statusCode, error.ErrorCode);
 

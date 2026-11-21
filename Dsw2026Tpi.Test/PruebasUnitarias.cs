@@ -903,6 +903,12 @@ public class PruebasUnitarias
 
         // Assert
         Assert.Equal(StatusCodes.Status409Conflict, httpContext.Response.StatusCode);
+        logger.Received(1).Log(
+            LogLevel.Warning,
+            Arg.Any<EventId>(),
+            Arg.Any<object>(),
+            Arg.Any<Exception>(),
+            Arg.Any<Func<object, Exception?, string>>());
     }
 
        [Fact]
