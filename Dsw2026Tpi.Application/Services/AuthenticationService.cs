@@ -34,7 +34,7 @@ public class AuthenticationService : IAuthenticationService
 
         if (user is null)
         {
-            _logger.LogWarning("Intento de login administrativo con usuario inexistente. Email: {Email}", request.Email);
+            _logger.LogWarning("Intento de login administrativo con usuario inexistente. Email: {Email}", MaskEmail(request.Email));
             throw new AuthenticationException();
         }
 
@@ -42,7 +42,7 @@ public class AuthenticationService : IAuthenticationService
 
         if (await _userManager.IsLockedOutAsync(user))
         {
-            _logger.LogWarning("Intento de login administrativo sobre cuenta bloqueada. Email: {Email}", request.Email);
+            _logger.LogWarning("Intento de login administrativo sobre cuenta bloqueada. Email: {Email}", MaskEmail(request.Email));
             throw new AuthenticationException();
         }
 
@@ -52,11 +52,11 @@ public class AuthenticationService : IAuthenticationService
         {
             if (await _userManager.IsLockedOutAsync(user))
             {
-                _logger.LogWarning("Cuenta de administrador bloqueada por intentos fallidos. Email: {Email}", request.Email);
+                _logger.LogWarning("Cuenta de administrador bloqueada por intentos fallidos. Email: {Email}", MaskEmail(request.Email));
             }
             else
             {
-                _logger.LogWarning("Intento de login administrativo fallido por contraseña incorrecta. Email: {Email}", request.Email);
+                _logger.LogWarning("Intento de login administrativo fallido por contraseña incorrecta. Email: {Email}", MaskEmail(request.Email));
             }
 
             throw new AuthenticationException();
@@ -66,7 +66,7 @@ public class AuthenticationService : IAuthenticationService
 
         if (!isAdministrator)
         {
-            _logger.LogWarning("Intento de login administrativo de un usuario sin rol Administrador. Email: {Email}", request.Email);
+            _logger.LogWarning("Intento de login administrativo de un usuario sin rol Administrador. Email: {Email}", MaskEmail(request.Email));
             throw new AuthenticationException();
         }
 
@@ -89,7 +89,7 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning(
                     "Intento de login de paciente con DNI asociado a otro email. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
+                    MaskEmail(request.Email),
                     MaskDni(request.Dni));
                 throw new ConflictException(nameof(ErrorCodes.PATIENT_DNI_CONFLICT), ErrorCodes.PATIENT_DNI_CONFLICT);
             }
@@ -114,7 +114,7 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning(
                     "No se pudo auto-registrar el paciente. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
+                    MaskEmail(request.Email),
                     MaskDni(request.Dni));
                 throw new AuthenticationException();
             }
@@ -125,7 +125,7 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning(
                     "No se pudo asignar el rol Paciente al usuario auto-registrado. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
+                    MaskEmail(request.Email),
                     MaskDni(request.Dni));
                 throw new AuthenticationException();
             }
@@ -138,7 +138,7 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning(
                     "Intento de login de paciente con DNI incorrecto. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
+                    MaskEmail(request.Email),
                     MaskDni(request.Dni));
                 throw new AuthenticationException();
             }
@@ -149,7 +149,7 @@ public class AuthenticationService : IAuthenticationService
             {
                 _logger.LogWarning(
                     "Intento de login de paciente con un usuario que no posee el rol Paciente. Email: {Email}, Dni: {MaskedDni}",
-                    request.Email,
+                    MaskEmail(request.Email),
                     MaskDni(request.Dni));
                 throw new AuthenticationException();
             }
@@ -196,7 +196,7 @@ public class AuthenticationService : IAuthenticationService
                 _logger.LogWarning(
                     "Intento de login de {LoginType} con usuario eliminado. Email: {Email}",
                     loginType,
-                    email);
+                    MaskEmail(email));
             }
 
             throw new AuthenticationException();
@@ -217,11 +217,21 @@ public class AuthenticationService : IAuthenticationService
                 _logger.LogWarning(
                     "Intento de login de {LoginType} con correo no confirmado. Email: {Email}",
                     loginType,
-                    email);
+                    MaskEmail(email));
             }
 
             throw new AuthenticationException();
         }
+    }
+    private static string MaskEmail(string email)
+    {
+        // El email es entrada del usuario: se enmascara y se le quitan los saltos de línea antes de loguearlo.
+        var clean = email.Replace("\r", string.Empty).Replace("\n", string.Empty);
+        var at = clean.IndexOf('@');
+
+        return at > 0
+            ? $"{clean[0]}***{clean[at..]}"
+            : new string('*', clean.Length);
     }
     private static string MaskDni(long dni)
     {

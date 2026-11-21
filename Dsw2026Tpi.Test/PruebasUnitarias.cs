@@ -1807,7 +1807,25 @@ public class PruebasUnitarias
         var log = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Warning, log.Level);
         Assert.DoesNotContain("Admin123!", log.Message);
+        Assert.DoesNotContain("admin@utn.com", log.Message);
+        Assert.Contains("a***@utn.com", log.Message);
         await signInService.DidNotReceive().CheckPassword(Arg.Any<ApplicationUser>(), Arg.Any<string>());
+    }
+
+    [Fact]
+    public async Task LoginAdmin_CuandoElEmailTraeSaltoDeLinea_NoLoEscribeEnElLog()
+    {
+        var (service, userManager, _, logger) = CrearAuthenticationServiceConSignIn();
+        userManager.FindByEmailAsync("admin@utn.com\r\nINYECTADO").Returns((ApplicationUser?)null);
+
+        await Assert.ThrowsAsync<AuthenticationException>(() =>
+            service.LoginAdmin(new LoginAdminModel.Request("admin@utn.com\r\nINYECTADO", "Admin123!")));
+
+        var log = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Warning, log.Level);
+        Assert.DoesNotContain("admin@utn.com", log.Message);
+        Assert.DoesNotContain("\n", log.Message);
+        Assert.DoesNotContain("\r", log.Message);
     }
 
     [Fact]
