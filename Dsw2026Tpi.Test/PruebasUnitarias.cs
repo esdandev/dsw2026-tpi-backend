@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Query;
 using Microsoft.Extensions.Logging;
@@ -1641,6 +1642,22 @@ public class PruebasUnitarias
             Arg.Any<object>(),
             Arg.Any<Exception?>(),
             Arg.Any<Func<object, Exception?, string>>());
+    }
+
+    [Fact]
+    public void ModelStateErrors_TraduceElBindingAElContratoDeErrores()
+    {
+        var modelState = new ModelStateDictionary();
+        modelState.AddModelError("Days", "The Days field is required.");
+        modelState.AddModelError("Filter.PageSize", "The value 'abc' is not valid for PageSize.");
+        modelState.AddModelError("$", "'e' is an invalid start of a property name. Expected a '\"'.");
+
+        var error = ModelStateErrors.From(modelState);
+
+        Assert.Equal(nameof(ErrorCodes.VALIDATION_ERROR), error.ErrorCode);
+        Assert.Contains(error.Details, detail => detail.Field == "days" && detail.Issue == "es obligatorio");
+        Assert.Contains(error.Details, detail => detail.Field == "filter.pageSize" && detail.Issue == "formato inválido");
+        Assert.Contains(error.Details, detail => detail.Field == "request" && detail.Issue == "valor inválido");
     }
 
     [Fact]
