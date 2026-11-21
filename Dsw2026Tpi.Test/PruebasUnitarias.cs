@@ -237,78 +237,6 @@ public class PruebasUnitarias
     }
 
     [Fact]
-    public async Task AppointmentUpdateStatus_CuandoElTurnoYaComenzo_MarcaAtendido()
-    {
-        var slot = new AvailabilitySlot
-        {
-            Id = Guid.NewGuid(),
-            DoctorId = Guid.NewGuid(),
-            Start = Clock.Now.AddMinutes(-30),
-            End = Clock.Now,
-            Status = SlotStatus.BOOKED
-        };
-        var appointment = new Appointment(slot, "patient-1", "Control de rutina");
-
-        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
-
-        var service = new AppointmentService(_persistence, _userManager, NullLogger<AppointmentService>.Instance);
-
-        var result = await service.UpdateStatus(appointment.Id, AppointmentStatus.ATTENDED);
-
-        Assert.Equal("ATTENDED", result.Status);
-        Assert.Equal(AppointmentStatus.ATTENDED, appointment.Status);
-        await _persistence.Received(1).Update(appointment);
-    }
-
-    [Fact]
-    public async Task AppointmentUpdateStatus_CuandoElTurnoEsFuturo_LanzaConflictException()
-    {
-        var slot = new AvailabilitySlot
-        {
-            Id = Guid.NewGuid(),
-            DoctorId = Guid.NewGuid(),
-            Start = Clock.Now.AddDays(1),
-            End = Clock.Now.AddDays(1).AddMinutes(30),
-            Status = SlotStatus.BOOKED
-        };
-        var appointment = new Appointment(slot, "patient-1", "Control de rutina");
-
-        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
-
-        var service = new AppointmentService(_persistence, _userManager, NullLogger<AppointmentService>.Instance);
-
-        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
-            service.UpdateStatus(appointment.Id, AppointmentStatus.NO_SHOW));
-
-        Assert.Equal("APPOINTMENT_CONFLICT", ex.Error.ErrorCode);
-        Assert.Equal(AppointmentStatus.BOOKED, appointment.Status);
-    }
-
-    [Fact]
-    public async Task AppointmentUpdateStatus_CuandoElTurnoNoEstaReservado_LanzaConflictException()
-    {
-        var slot = new AvailabilitySlot
-        {
-            Id = Guid.NewGuid(),
-            DoctorId = Guid.NewGuid(),
-            Start = Clock.Now.AddMinutes(-30),
-            End = Clock.Now,
-            Status = SlotStatus.AVAILABLE
-        };
-        var appointment = new Appointment(slot, "patient-1", "Control de rutina");
-        appointment.Cancel();
-
-        _persistence.GetById<Appointment>(appointment.Id, nameof(Appointment.AvailabilitySlot)).Returns(appointment);
-
-        var service = new AppointmentService(_persistence, _userManager, NullLogger<AppointmentService>.Instance);
-
-        var ex = await Assert.ThrowsAsync<ConflictException>(() =>
-            service.UpdateStatus(appointment.Id, AppointmentStatus.ATTENDED));
-
-        Assert.Equal("APPOINTMENT_CONFLICT", ex.Error.ErrorCode);
-    }
-
-    [Fact]
     public void AdministrativePatient_CuandoTieneNombreYApellido_EntoncesDevuelveElNombreCompleto()
     {
         var patient = new ApplicationUser
@@ -839,8 +767,7 @@ public class PruebasUnitarias
                 new AppointmentCreateRequestValidator(),
                 new AppointmentGetByDateQueryValidator(),
                 new AppointmentSearchQueryValidator(),
-                new AppointmentGetByPatientQueryValidator(),
-                new AppointmentUpdateStatusValidator())
+                new AppointmentGetByPatientQueryValidator())
             {
                 ControllerContext = new ControllerContext { HttpContext = httpContext }
             };
@@ -1348,8 +1275,7 @@ public class PruebasUnitarias
             new AppointmentCreateRequestValidator(),
             new AppointmentGetByDateQueryValidator(),
             new AppointmentSearchQueryValidator(),
-            new AppointmentGetByPatientQueryValidator(),
-            new AppointmentUpdateStatusValidator())
+            new AppointmentGetByPatientQueryValidator())
         {
             ControllerContext = new ControllerContext { HttpContext = httpContext }
         };

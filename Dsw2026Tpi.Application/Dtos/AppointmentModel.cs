@@ -23,8 +23,6 @@ public static class AppointmentModel
     public record PatientRequest(long Dni);
     public record CreateRequest(Guid DoctorId, Guid AvailabilitySlotId, PatientRequest Patient, string Reason);
     public record CreateResponse(Guid Id, string Status, DateTime StartTime, DateTime EndTime);
-    public record UpdateStatusRequest(string Status);
-    public record UpdateStatusResponse(Guid Id, string Status);
     public record GetByDateQuery(string Date, int PageSize, int PageIndex);
     public record SearchQuery(Guid? SpecialtyId, Guid? DoctorId, long? Dni, string? Date, int PageSize, int PageIndex);
     public record PatientResponse(Guid Id, Guid DoctorId, string DoctorName, string Reason, string Status, DateTime StartTime, DateTime EndTime);

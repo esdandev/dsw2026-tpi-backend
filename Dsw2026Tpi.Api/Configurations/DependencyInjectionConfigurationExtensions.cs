@@ -37,7 +37,6 @@ public static class DependencyInjectionConfigurationExtensions
         services.AddScoped<IValidator<AppointmentModel.SearchQuery>, AppointmentSearchQueryValidator>();
         services.AddScoped<IValidator<AppointmentModel.SearchQuery>, AppointmentSearchQueryValidator>();
         services.AddScoped<IValidator<AppointmentModel.GetByPatientQuery>, AppointmentGetByPatientQueryValidator>();
-        services.AddScoped<IValidator<AppointmentModel.UpdateStatusRequest>, AppointmentUpdateStatusValidator>();
         services.AddScoped<IValidator<SpecialityModel.GetAllQuery>, SpecialityGetAllValidator>();
         services.AddScoped<IValidator<DoctorModel.Request>, DoctorRequestValidator>();
         services.AddScoped<IValidator<DoctorModel.GetAllQuery>, DoctorGetAllQueryValidator>();
