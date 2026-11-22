@@ -571,6 +571,52 @@ public class PruebasUnitarias
     }
 
     [Fact]
+    public async Task Update_CuandoElHorarioDelTurnoCanceladoReaparece_ReviveElSlotComoDisponible()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var today = Clock.Today;
+        var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+        var reglaVieja = Guid.NewGuid();
+        var slot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            RuleId = reglaVieja,
+            Start = Clock.FromArgentina(lastDay.AddHours(8)),
+            End = Clock.FromArgentina(lastDay.AddHours(8).AddMinutes(30)),
+            Status = SlotStatus.LOCKED
+        };
+        var cancelado = new Appointment(slot, "paciente", "Control de rutina");
+        cancelado.Cancel();
+
+        persistence.GetFiltered<AvailabilitySlot>(
+                Arg.Any<Expression<Func<AvailabilitySlot, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { slot });
+        persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { cancelado });
+
+        // El horario del slot bloqueado vuelve a estar dentro de la disponibilidad pedida.
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "08:00", "08:30"))
+            .ToArray();
+
+        await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        await persistence.Received(1).Update(Arg.Is<AvailabilitySlot>(s =>
+            s.Id == slot.Id &&
+            s.Status == SlotStatus.AVAILABLE &&
+            s.RuleId != reglaVieja &&
+            s.BookedCount == 0));
+        await persistence.DidNotReceive().Delete(Arg.Any<AvailabilitySlot>());
+    }
+
+    [Fact]
     public async Task Update_CuandoHayTurnosReservadosYCancelados_LosConservaYNoLanza()
     {
         var persistence = Substitute.For<IPersistence>();
