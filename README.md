@@ -72,6 +72,8 @@ Configurado en la sección `RateLimiting` de `appsettings.json` (no está codifi
 | `appointment-create` | 5 solicitudes/minuto | paciente autenticado |
 | `general` | 100 solicitudes/minuto | usuario o IP |
 
+El límite general es de 100 por minuto. Cada pantalla del administrador dispara varias consultas (médicos, especialidades, turnos) y en desarrollo React StrictMode monta cada efecto dos veces, pero el front cachea las lecturas (TTL 60 s con deduplicación de pedidos en vuelo), así que la navegación normal no lo agota. Las políticas sensibles (login de administrador, login de paciente y creación de turnos) se mantienen aparte.
+
 Las solicitudes rechazadas devuelven `429 Too Many Requests` con el formato de error habitual (`RATE_LIMIT_EXCEEDED`), se registran en el log y no se encolan.
 
 ## Endpoints implementados

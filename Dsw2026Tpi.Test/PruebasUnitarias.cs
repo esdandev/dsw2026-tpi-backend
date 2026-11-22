@@ -695,6 +695,92 @@ public class PruebasUnitarias
         Assert.Equal(valida, result.IsValid);
     }
 
+    [Theory]
+    [InlineData("c", true)]
+    [InlineData("card", true)]
+    [InlineData("", true)]
+    [InlineData(" ", true)]
+    [InlineData(null, true)]
+    public void SpecialityGetAllValidator_AceptaFiltrosCortos(string? name, bool valida)
+    {
+        var validator = new SpecialityGetAllValidator();
+        var query = new SpecialityModel.GetAllQuery(10, 0, name);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+    }
+
+    [Fact]
+    public void SpecialityGetAllValidator_RechazaUnFiltroDeMasDe100Caracteres()
+    {
+        var validator = new SpecialityGetAllValidator();
+        var query = new SpecialityModel.GetAllQuery(10, 0, new string('a', 101));
+
+        Assert.False(validator.Validate(query).IsValid);
+        Assert.True(validator.Validate(new SpecialityModel.GetAllQuery(10, 0, new string('a', 100))).IsValid);
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    [InlineData(1000, false)]
+    public void SpecialityGetAllValidator_AcotaElPageSize(int pageSize, bool valida)
+    {
+        var validator = new SpecialityGetAllValidator();
+        var query = new SpecialityModel.GetAllQuery(pageSize, 0, null);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+
+        if (!valida)
+        {
+            Assert.Contains(result.Errors, error => error.PropertyName == "PageSize");
+        }
+    }
+
+    [Theory]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    public void DoctorGetAllQueryValidator_AcotaElPageSize(int pageSize, bool valida)
+    {
+        var validator = new DoctorGetAllQueryValidator();
+        var query = new DoctorModel.GetAllQuery(pageSize, 0, null);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+
+        if (!valida)
+        {
+            Assert.Contains(result.Errors, error => error.PropertyName == "PageSize");
+        }
+    }
+
+    [Theory]
+    [InlineData("c", true)]
+    [InlineData("", true)]
+    public void DoctorGetAllQueryValidator_AceptaFiltroDeUnaLetra(string? name, bool valida)
+    {
+        var validator = new DoctorGetAllQueryValidator();
+        var query = new DoctorModel.GetAllQuery(10, 0, name);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+    }
+
+    [Fact]
+    public void DoctorGetAllQueryValidator_RechazaUnFiltroDeMasDe100Caracteres()
+    {
+        var validator = new DoctorGetAllQueryValidator();
+
+        Assert.False(validator.Validate(new DoctorModel.GetAllQuery(10, 0, new string('a', 101))).IsValid);
+        Assert.True(validator.Validate(new DoctorModel.GetAllQuery(10, 0, new string('a', 100))).IsValid);
+    }
+
     [Fact]
     public void DayRequestValidator_CuandoElDiaEstaVacio_DevuelveMensajeEnEspanol()
     {
