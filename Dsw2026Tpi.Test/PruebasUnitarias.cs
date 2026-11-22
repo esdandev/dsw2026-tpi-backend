@@ -532,7 +532,7 @@ public class PruebasUnitarias
     }
 
     [Fact]
-    public async Task Update_CuandoElTurnoEstaCancelado_EntoncesBorraElSlotEnVezDeBloquearlo()
+    public async Task Update_CuandoElTurnoEstaCancelado_EntoncesBloqueaElSlotEnVezDeBorrarlo()
     {
         var persistence = Substitute.For<IPersistence>();
         var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
@@ -566,8 +566,72 @@ public class PruebasUnitarias
 
         await service.Update(CrearRequestDeDisponibilidad(doctor, days));
 
-        await persistence.Received(1).Delete(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
-        await persistence.DidNotReceive().Update(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
+        await persistence.Received(1).Update(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id && s.Status == SlotStatus.LOCKED));
+        await persistence.DidNotReceive().Delete(Arg.Is<AvailabilitySlot>(s => s.Id == slot.Id));
+    }
+
+    [Fact]
+    public async Task Update_CuandoHayTurnosReservadosYCancelados_LosConservaYNoLanza()
+    {
+        var persistence = Substitute.For<IPersistence>();
+        var service = CrearServicioDeDisponibilidad(persistence, Substitute.For<IHolidayProvider>());
+
+        var doctor = CrearDoctor();
+        persistence.GetById<Doctor>(doctor.Id).Returns(doctor);
+
+        var today = Clock.Today;
+        var lastDay = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
+
+        var bookedSlot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.FromArgentina(lastDay.AddHours(8)),
+            End = Clock.FromArgentina(lastDay.AddHours(8).AddMinutes(30)),
+            Status = SlotStatus.BOOKED,
+            BookedCount = 1
+        };
+
+        var cancelledSlot = new AvailabilitySlot
+        {
+            Id = Guid.NewGuid(),
+            DoctorId = doctor.Id,
+            Start = Clock.FromArgentina(lastDay.AddHours(9)),
+            End = Clock.FromArgentina(lastDay.AddHours(9).AddMinutes(30)),
+            Status = SlotStatus.AVAILABLE
+        };
+
+        var reservado = new Appointment(bookedSlot, "paciente1", "Control de rutina");
+        var cancelado = new Appointment(cancelledSlot, "paciente2", "Control de rutina");
+        cancelado.Cancel();
+
+        persistence.GetFiltered<AvailabilitySlot>(
+                Arg.Any<Expression<Func<AvailabilitySlot, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { bookedSlot, cancelledSlot });
+        persistence.GetFiltered<Appointment>(
+                Arg.Any<Expression<Func<Appointment, bool>>>(), Arg.Any<string[]>())
+            .Returns(new[] { reservado, cancelado });
+
+        var days = new[] { "LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO" }
+            .Select(day => (day, "15:30", "16:30"))
+            .ToArray();
+
+        var result = await service.Update(CrearRequestDeDisponibilidad(doctor, days));
+
+        Assert.Single(result);
+
+        // Ningún slot con turno se borra (el FK es obligatorio), ni siquiera el del turno cancelado.
+        await persistence.DidNotReceive().Delete(Arg.Any<AvailabilitySlot>());
+        await persistence.DidNotReceive().Update(Arg.Is<AvailabilitySlot>(s => s.Id == bookedSlot.Id));
+        await persistence.Received(1).Update(Arg.Is<AvailabilitySlot>(s => s.Id == cancelledSlot.Id && s.Status == SlotStatus.LOCKED));
+
+        // Los turnos quedan intactos: mismo slot, mismo estado, sin updates.
+        Assert.Equal(bookedSlot.Id, reservado.AvailabilitySlotId);
+        Assert.Equal(AppointmentStatus.BOOKED, reservado.Status);
+        Assert.Equal(cancelledSlot.Id, cancelado.AvailabilitySlotId);
+        Assert.Equal(AppointmentStatus.CANCELLED, cancelado.Status);
+        await persistence.DidNotReceive().Update(Arg.Any<Appointment>());
+        await persistence.DidNotReceive().Delete(Arg.Any<Appointment>());
     }
 
     [Theory]
