@@ -285,8 +285,9 @@ public class AvailabilityService : IAvailabilityService
                 slotIds.Contains(appointment.AvailabilitySlotId));
 
             if (appointments != null)
+                // El FK Appointment.AvailabilitySlotId es obligatorio: un slot con turno, aunque esté cancelado,
+                // no se puede borrar sin dejar el turno huérfano (EF tira InvalidOperationException).
                 referencedSlotIds = appointments
-                    .Where(appointment => appointment.Status != AppointmentStatus.CANCELLED)
                     .Select(appointment => appointment.AvailabilitySlotId)
                     .ToHashSet();
         }
