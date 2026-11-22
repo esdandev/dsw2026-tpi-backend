@@ -722,6 +722,44 @@ public class PruebasUnitarias
     }
 
     [Theory]
+    [InlineData(1, true)]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    [InlineData(1000, false)]
+    public void SpecialityGetAllValidator_AcotaElPageSize(int pageSize, bool valida)
+    {
+        var validator = new SpecialityGetAllValidator();
+        var query = new SpecialityModel.GetAllQuery(pageSize, 0, null);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+
+        if (!valida)
+        {
+            Assert.Contains(result.Errors, error => error.PropertyName == "PageSize");
+        }
+    }
+
+    [Theory]
+    [InlineData(100, true)]
+    [InlineData(101, false)]
+    public void DoctorGetAllQueryValidator_AcotaElPageSize(int pageSize, bool valida)
+    {
+        var validator = new DoctorGetAllQueryValidator();
+        var query = new DoctorModel.GetAllQuery(pageSize, 0, null);
+
+        var result = validator.Validate(query);
+
+        Assert.Equal(valida, result.IsValid);
+
+        if (!valida)
+        {
+            Assert.Contains(result.Errors, error => error.PropertyName == "PageSize");
+        }
+    }
+
+    [Theory]
     [InlineData("c", true)]
     [InlineData("", true)]
     public void DoctorGetAllQueryValidator_AceptaFiltroDeUnaLetra(string? name, bool valida)
